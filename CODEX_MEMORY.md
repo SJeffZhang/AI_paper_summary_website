@@ -24,48 +24,80 @@ When continuing work in this repository, read this file first.
 ## Latest Review Target
 - File reviewed: `Detailed_PRD.md`
 
-## Latest Findings
-1. [P1] Batch time window is not clearly defined.
-   - The PRD mixes "past 24 hours", "run every day at 02:00", and date-based frontend queries.
-   - It does not define a fixed timezone, batch ownership date, or the mapping between arXiv `published_date` and summary `publish_date`.
+## Latest PRD Status
+- The PRD has gone through multiple review rounds and is now considered implementation-ready.
+- The latest review did not produce new substantive findings.
+- The current design direction is stable enough to start building.
 
-2. [P1] Idempotency is missing for reruns.
-   - `paper` has unique `arxiv_id`, but `paper_summary` does not define a uniqueness rule such as `(paper_id, publish_date)`.
-   - Task reruns or manual backfills can generate duplicate homepage items, RSS items, and emails.
-
-3. [P1] Subscription and unsubscribe flow lacks security/compliance design.
-   - The API only accepts `email + action`.
-   - There is no email confirmation, signed unsubscribe token, or abuse/rate-limit design.
-
-4. [P2] API contract and data model are inconsistent.
-   - The PRD defines a unified response envelope, but examples only show the `data` fragment.
-   - `core_highlights` is described ambiguously across endpoints.
-   - `published_date` and `publish_date` are mixed.
-
-5. [P2] Filter and AI processing rules are not executable enough yet.
-   - The PRD does not define the institution source, scoring formula, thresholds, JSON parsing fallback, timeout/retry policy, quota limits, or cost controls.
-
-## Review Notes
-- The PRD direction is reasonable.
-- It is not implementation-frozen yet.
-- The most likely rework areas are:
-  - batch/date model
+## Review Progress Summary
+- Early review rounds identified major gaps in:
+  - batch/date ownership
   - rerun idempotency
-  - subscription confirmation/unsubscribe flow
-  - frontend/backend schema contract
+  - subscription security and compliance
+  - API/data-model contract consistency
+  - AI pipeline executability
+- These were iteratively corrected in later PRD revisions.
+- The latest accepted direction uses:
+  - `issue_date` as the batch and frontend query key
+  - MySQL uniqueness constraints for idempotency
+  - double opt-in subscription and tokenized unsubscribe
+  - strict API contract wording with explicit non-JSON exceptions
+  - Hugging Face Daily Papers as the upstream source
+  - a Markdown-based multi-agent AI pipeline
+
+## Current AI Pipeline Snapshot
+- Data source: Hugging Face Daily Papers.
+- Crawler mapping is explicitly documented from HF fields to `arxiv_id`, `pdf_url`, `authors`, `upvotes`, and `arxiv_publish_date`.
+- AI workflow uses three roles:
+  - Editor
+  - Writer
+  - Reviewer
+- Pipeline carrier format: structured Markdown, not JSON.
+- Backend parsing strategy:
+  - Markdown structure + regex extraction
+  - strong validation at each stage
+- Current validation rules captured in the PRD include:
+  - Editor output IDs must be unique and must come from the Top 15 candidate set
+  - Writer output ID set must exactly match the Editor-selected set before review
+  - Reviewer output must include overall decision and a rejected-ID list
+  - On Writer rewrites, the system requires a full-set output, not a partial patch output
+  - If rejected items are discarded and the final kept count drops below 3, the batch fails and rolls back
+
+## Prompt Assets
+- Prompt files now exist under `backend/prompts/`:
+  - `editor_prompt.md`
+  - `writer_prompt.md`
+  - `reviewer_prompt.md`
+- Their structure is now aligned with the Markdown-carried AI pipeline in the PRD.
 
 ## Collaboration Notes From User
 - User requested a Codex-only Markdown file under this project for persistent work summary/context.
 - User expects Codex to focus on review work in this project and do the final Git commit/upload at the end.
 - User requested repository initialization and GitHub repository creation/push.
+- User explicitly wants this memory file to be kept up to date after each conversation turn in this project.
 
 ## Remote Repository Plan
 - Intended remote repository name: `AI_paper_summary_website`
 - Intended owner: `Mr-silence`
- - Intended visibility by default: `private`
+- Intended visibility by default: `private`
 
 ## Remote Repository Status
 - GitHub repository created successfully.
 - Remote URL: `https://github.com/Mr-silence/AI_paper_summary_website`
 - Git remote name: `origin`
 - Local branch `main` is tracking `origin/main`
+
+## Working Tree Notes
+- Current project work is still PRD-centric.
+- Current git delivery set includes:
+  - updated `Detailed_PRD.md`
+  - new prompt assets under `backend/prompts/`
+  - project-side memory note `geminicli.md`
+- `hf_response.json` is currently an empty scratch file and is not part of the intended deliverable set.
+
+## Latest Git Action Request
+- On 2026-03-23, the user requested pushing the current documentation/prompt work to GitHub.
+- The requested commit message language is Chinese.
+
+## Memory Maintenance Rule
+- At the end of each future conversation turn in this project, update `CODEX_MEMORY.md` if the project state, review conclusions, or collaboration rules have materially changed.
