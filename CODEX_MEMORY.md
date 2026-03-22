@@ -13,10 +13,13 @@ When continuing work in this repository, read this file first.
 - Checked on 2026-03-23.
 - Project path: `/Users/zhangshijie/Desktop/Project/AI_paper_summary_website`
 - Git repository initialized locally on branch `main`.
+- Initial commit created: `1563259` (`chore: initialize project repository`)
 - Global Git identity detected:
   - `user.name = Zhang Shijie`
   - `user.email = z1332556430@gmail.com`
-- GitHub CLI is installed, but `gh auth status` showed no active login.
+- GitHub CLI is installed and authenticated.
+- Active GitHub account: `Mr-silence`
+- Git protocol: `https`
 
 ## Latest Review Target
 - File reviewed: `Detailed_PRD.md`
@@ -55,3 +58,8 @@ When continuing work in this repository, read this file first.
 - User requested a Codex-only Markdown file under this project for persistent work summary/context.
 - User expects Codex to focus on review work in this project and do the final Git commit/upload at the end.
 - User requested repository initialization and GitHub repository creation/push.
+
+## Remote Repository Plan
+- Intended remote repository name: `AI_paper_summary_website`
+- Intended owner: `Mr-silence`
+- Intended visibility by default: `private`
