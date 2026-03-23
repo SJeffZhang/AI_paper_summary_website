@@ -8,6 +8,10 @@
       <el-skeleton :rows="10" animated />
     </div>
 
+    <div v-else-if="!loading && !paper" class="empty-state" style="margin-top: 50px;">
+      <el-empty description="未找到相关论文或数据加载失败" />
+    </div>
+
     <div v-else-if="paper" class="paper-article">
       <h1 class="article-title">{{ paper.title }}</h1>
       <div class="article-meta">
@@ -62,39 +66,28 @@
 import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { Back, Document } from '@element-plus/icons-vue'
+import { getPaperDetail } from '../api/papers'
+import { ElMessage } from 'element-plus'
 
 const route = useRoute()
 const loading = ref(false)
 const paper = ref(null)
 
-const fetchPaperDetail = async (id) => {
+const fetchDetail = async (id) => {
   loading.value = true
-  // Mock Data
-  setTimeout(() => {
-    paper.value = {
-      id: id,
-      arxiv_id: '2403.01234',
-      title: 'An Awesome Breakthrough in AI Models',
-      authors: ['Alice Smith', 'Bob Johnson', 'Charlie Brown'],
-      abstract: 'This paper presents a novel approach to optimizing large language models. By introducing a new attention mechanism, we achieve a 10x speedup in inference time without compromising accuracy. The method is evaluated on standard benchmarks and shows state-of-the-art results.',
-      pdf_url: 'https://arxiv.org/pdf/2403.01234.pdf',
-      one_line_summary: '这篇论文提出了一种全新方法，让AI的响应速度提升了十倍！',
-      core_highlights: [
-        '无需增加额外算力，仅靠算法优化实现性能飞跃。',
-        '在多个主流评测榜单中刷新了SOTA记录。',
-        '开源了完整的训练代码和权重，方便社区复现。',
-        '彻底解决了在长文本生成中的显存爆炸问题。'
-      ],
-      application_scenarios: '这项技术可以直接部署在手机等端侧设备上。未来，你的手机语音助手在回答复杂问题时，将不再需要漫长的“思考时间”，而是能够做到即问即答。同时，对于企业来说，这也意味着大模型推理成本的成倍降低。',
-      issue_date: '2026-03-23',
-      arxiv_publish_date: '2026-03-22'
-    }
+  try {
+    const data = await getPaperDetail(id)
+    paper.value = data
+  } catch (error) {
+    // Error is handled in interceptor
+    paper.value = null
+  } finally {
     loading.value = false
-  }, 500)
+  }
 }
 
 onMounted(() => {
-  fetchPaperDetail(route.params.id)
+  fetchDetail(route.params.id)
 })
 </script>
 

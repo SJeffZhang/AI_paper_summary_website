@@ -12,11 +12,11 @@ When continuing work in this repository, read this file first.
 - Default review style: findings first, ordered by severity, then assumptions/questions, then a short summary.
 
 ## Current Repository State
-- Checked on 2026-03-23.
+- Checked on 2026-03-24.
 - Project path: `/Users/zhangshijie/Desktop/Project/AI_paper_summary_website`
 - Git repository initialized locally on branch `main`.
 - Initial commit created: `1563259` (`chore: initialize project repository`)
-- Latest pushed commit: `0d831d5` (`前端：搭建基础框架并同步需求文档`)
+- When the exact latest pushed commit matters, read it from `git log --oneline origin/main -1`.
 - Global Git identity detected:
   - `user.name = Zhang Shijie`
   - `user.email = z1332556430@gmail.com`
@@ -26,20 +26,44 @@ When continuing work in this repository, read this file first.
 
 ## Latest Review Target
 - Files reviewed:
-  - `frontend/src/main.js`
-  - `frontend/src/router/index.js`
-  - `frontend/src/App.vue`
-  - `frontend/src/views/Home.vue`
-  - `frontend/src/views/Detail.vue`
-  - `frontend/src/views/Unsubscribe.vue`
-  - `frontend/src/style.css`
-  - `frontend/package.json`
+  - `backend/app/core/config.py`
+  - `backend/app/db/session.py`
+  - `backend/app/models/domain.py`
+  - `backend/app/schemas/paper.py`
+  - `backend/app/api/v1/papers.py`
+  - `backend/app/api/v1/subscribe.py`
+  - `backend/app/main.py`
 
 ## Latest PRD Status
 - The PRD has gone through multiple review rounds and is now considered implementation-ready.
 - The latest review did not produce new substantive findings.
 - The current design direction is stable enough to start building.
 - The frontend-facing PRD has been updated from date-switching homepage behavior to a feed-style homepage with `page`/`limit` pagination.
+
+## Latest Backend Review Status
+- The previously reported backend initialization issues have been fixed:
+  - the app now imports and starts successfully
+  - `paper_summary` now includes the composite unique constraint on `(paper_id, issue_date)`
+  - global exception handlers are now registered for JSON endpoints
+  - the subscription verification redirect target now comes from `settings.FRONTEND_URL`
+- Startup verification now passes with:
+  - `cd backend && ./venv/bin/python -c "from app.main import app; print(app.title)"`
+  - output: `AI Paper Summary API`
+- The previously missing `GET /api/v1/rss` route is now implemented and registered.
+- A backend-local `.gitignore` now excludes `venv/`, `.env`, and `__pycache__/`, which addresses the earlier repository hygiene concern for new commits.
+- The current limiter risk has been explicitly accepted by the user for the demo stage:
+  - `POST /api/v1/subscribe` uses an in-memory per-process IP limiter
+  - this is acceptable for the current demo target
+  - before production launch, the limiter should be upgraded to a shared-store design (for example Redis) to preserve the strict `5/hour/IP` contract across multi-worker or multi-instance deployments
+- The latest pipeline review identified new implementation gaps in the AI batch workflow:
+  - the prompt path issue has been fixed; `AIProcessor()` now initializes correctly from the `backend/` working directory
+  - the crawl backfill date issue has been fixed; `Pipeline.run(target_date=...)` now computes `fetch_date = target_date - 1 day`
+  - the crawler fallback-date `NameError` has been fixed by passing an explicit normalization fallback date
+  - the previous strong-contract gaps around Editor retry, Writer retry, Reviewer reject-list validation, and strict final field parsing have now been addressed
+  - the duplicate-ID enforcement gaps have now been addressed:
+    - `run_editor()` now rejects duplicate selected IDs
+    - `run_writer()` now rejects duplicate paper sections before doing set-equality validation
+  - the latest review of those fixes did not identify new substantive pipeline findings
 
 ## Latest Frontend Review Status
 - The frontend scaffold can build successfully with Vite.
@@ -48,6 +72,12 @@ When continuing work in this repository, read this file first.
 - The current frontend implementation is broadly aligned with the updated PRD's feed + pagination direction.
 - There is still one document/code alignment caveat: PRD section 4.1 header wording still mentions archive/about/RSS navigation, while the actual current frontend header only exposes home + email subscription.
 - The previous race-condition issue in homepage pagination has been fixed by adding stale-response protection.
+- The frontend API integration now exists through a shared Axios request utility and `api/papers.js`.
+- The previously reported runtime issues in the API-integrated frontend have been fixed:
+  - the subscription dialog icon binding now uses the component object
+  - the homepage now renders a visible empty state for empty/error results
+  - the detail page now renders a visible empty/error state for failed loads
+- The latest review of those fixes did not identify new substantive findings.
 - Build verification still passes, but Vite continues to warn that the main production chunk is larger than 500 kB.
 
 ## Review Progress Summary
@@ -114,6 +144,13 @@ When continuing work in this repository, read this file first.
 - Current project work now includes frontend scaffold/build-out in addition to PRD iteration.
 - The current frontend scaffold, PRD updates, and project notes have been pushed to `origin/main`.
 - Only `CODEX_MEMORY.md` has a new local sync update after that push.
+- The backend implementation, frontend API integration, and AI pipeline modules now exist in the repository worktree and are part of the current review baseline.
+- The backend now also includes `backend/app/api/v1/rss.py` and `backend/.gitignore`.
+- The backend now also includes pipeline-related service modules under `backend/app/services/`:
+  - `crawler.py`
+  - `filter.py`
+  - `ai_processor.py`
+  - `pipeline.py`
 
 ## Latest Git Action Request
 - On 2026-03-23, the user requested pushing the current PRD/frontend updates to GitHub.

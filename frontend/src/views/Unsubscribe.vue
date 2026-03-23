@@ -27,13 +27,14 @@
 import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { Loading, CircleCheckFilled, CircleCloseFilled } from '@element-plus/icons-vue'
+import { unsubscribeEmail } from '../api/papers'
 
 const route = useRoute()
 const loading = ref(true)
 const success = ref(false)
 const errorMessage = ref('')
 
-onMounted(() => {
+onMounted(async () => {
   const token = route.query.token
   if (!token) {
     loading.value = false
@@ -42,12 +43,15 @@ onMounted(() => {
     return
   }
 
-  // Mock API call for Unsubscribe
-  setTimeout(() => {
-    loading.value = false
-    // Simulate success
+  try {
+    await unsubscribeEmail(token)
     success.value = true
-  }, 1500)
+  } catch (error) {
+    success.value = false
+    errorMessage.value = error.message || '退订链接无效或已过期，请确认链接完整性。'
+  } finally {
+    loading.value = false
+  }
 })
 </script>
 

@@ -26,22 +26,35 @@
         *   在 PRD 中增加了 Editor 产出的**来源校验**（提取的 ID 必须唯一且属于候选子集），以及 Writer 产出的**强一致性比对**（提取的 `arxiv_id` 必须与 Editor 输出的 ID 集合完全相等，严禁遗漏或篡改）。
         *   修改了 Reviewer Prompt，强制要求输出**`拒绝名单 (rejected IDs)`**，并在后端增加了**语义校验**（保证拒绝对齐）。明确了 Writer 重写时必须**输出全量选题集（过审 + 修改）**，以及在重试耗尽后如何利用最后一次合法名单精准剔除问题论文（按篇舍弃），这使得“按篇舍弃”在代码层面具备了完全的可执行性。
 
-### [2026-03-23] 编码实施阶段 (进行中)
+### [2026-03-24] 编码实施阶段 (进行中)
 *   **动作**:
-    1.  完成了 `frontend/` 目录下的 Vue 3 + Vite 工程初始化。
-    2.  安装了 Element Plus、Vue Router 和 Axios 等核心依赖。
-    3.  搭建了网站的基础骨架：配置了前端路由 (`/`, `/paper/:id`, `/unsubscribe`)，并完成了 `Home.vue` (按日期分组的无限滚动/分页首页), `Detail.vue` (详情页), `Unsubscribe.vue` (退订页) 的基础 UI 编写，实现了邮件订阅弹窗的交互逻辑。
-    4.  优化了前端架构：取消了 Element Plus 图标的全局注册以缩减打包体积；清除了 Vite 默认模板中冲突的深色模式与全局样式；废弃了单独的“归档页”设计，将历史期号数据与首页整合为按天分组的分页流 (Feed) 模式，提升了沉浸式阅读体验。在 `Home.vue` 中加入了基于 `requestId` 的**竞态保护机制**，防止了快速翻页时旧请求覆盖新数据的 Bug。
-    5.  **同步更新了 PRD (`Detailed_PRD.md`)**：彻底删除了 `4.2 往期归档页` 的产品定义，同步了 `4.1 整体布局` 中的顶栏设计（移除了不存在的导航和未实现的 RSS 图标），修改了 `4.2 首页` 的交互说明，并将 `6.1 获取简报列表` 的 API 设计修改为了**标准分页结构** (`page`, `limit`, `total`, `items`)。这一改动已彻底向下游后端契约对齐。
-    
-*   **核心产出**: 完整的前端 Mock 数据版本原型已经可以本地运行。
+    1.  修正了 `backend/app/models/domain.py` 中的 `TinyInt` 导入错误并补全了 `PaperSummary` 的联合唯一约束。
+    2.  在 `backend/app/main.py` 中实现了全局异常处理器。
+    3.  解耦了前端重定向 URL，同步更新了 `config.py` 和 `.env`。
+    4.  安装了 `email-validator` 依赖。
+    5.  编写了 `database/schema.sql`。
+    6.  实现了 `GET /api/v1/rss` 接口。
+    7.  实现了订阅接口的单 IP 限流 (5次/小时)。
+    8.  **[深度重构与契约增强]** 完善了自动化跑批流水线 (`backend/app/services/pipeline.py`)：
+        *   **Editor 重试机制**：为 Editor 阶段增加了受控的 2 次重试逻辑，确保初筛阶段的鲁棒性。
+        *   **Writer/Reviewer 闭环重写**：将结构校验失败（如 ID 不匹配、重复 ID）纳入重试循环，不再直接中断整批任务。
+        *   **Reviewer 语义校验**：实现了对 `REJECTED` 状态的严苛校验，确保拒绝名单非空且属于有效 ID 子集。
+        *   **数据完整性强制保证**：重构了 `parse_final_summaries`，对“一句话总结”、“核心亮点”、“应用场景”等必填项进行非空和结构校验，杜绝残缺数据入库。
+        *   **[新增] ID 唯一性强校验**：在 Editor 和 Writer 阶段均增加了对 ID 重复的严格检查，确保产出的简报不包含重复章节。
+        *   **错误反馈机制**：重试时会将具体的解析错误或审核意见回灌给 LLM，提高纠错成功率。
+    9.  验证了后端应用可正常启动，并对 Crawler 和 Filter 进行了单元验证。
+
+*   **核心产出**: 
+    *   完全对齐 PRD 强契约要求的 AI 跑批引擎。
+    *   具备自我纠错能力的 Agentic Workflow 编排实现。
 
 ## 3. 下一步计划 (待执行)
-*   等待用户指令，开始进入实际编码阶段。
-*   **潜在起点**: 
-    1.  编写 `database/schema.sql` 完成数据库表结构的物理初始化。
-    2.  初始化后端 FastAPI 工程，搭建基础骨架和路由。
-    3.  初始化前端 Vue 3 (Vite) 工程，配置路由、Element Plus 和基础网络请求拦截器。
+*   开始实现核心 AI 跑批流水线 (`backend/app/services/pipeline.py`)：
+    1.  实现 `Crawler Module` 从 Hugging Face 获取数据。
+    2.  实现 `Filter Module` 按点赞数排序。
+    3.  实现 `AI Processor Module` (Editor -> Writer -> Reviewer) 的 Markdown 契约逻辑。
+*   完善前端对统一响应格式的处理逻辑。
+
 
 ## 4. 关键备忘录
 *   严格遵守 `Detailed_PRD.md` 中定义的字段契约（如 `authors` 和 `core_highlights` 必须为 JSON 数组）。

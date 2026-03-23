@@ -33,7 +33,7 @@
           <el-input 
             v-model="subscribeForm.email" 
             placeholder="请输入您的邮箱地址"
-            prefix-icon="Message"
+            :prefix-icon="Message"
           />
         </el-form-item>
       </el-form>
@@ -53,6 +53,7 @@
 import { ref, reactive } from 'vue'
 import { Message } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import { subscribeEmail } from './api/papers'
 
 const subscribeDialogVisible = ref(false)
 const subscribing = ref(false)
@@ -71,19 +72,22 @@ const rules = {
 
 const handleSubscribe = async () => {
   if (!subscribeFormRef.value) return
-  await subscribeFormRef.value.validate((valid) => {
+  await subscribeFormRef.value.validate(async (valid) => {
     if (valid) {
       subscribing.value = true
-      // Simulate API call
-      setTimeout(() => {
-        subscribing.value = false
+      try {
+        await subscribeEmail(subscribeForm.email)
         subscribeDialogVisible.value = false
         ElMessage({
           message: '验证邮件已发送，请前往邮箱点击确认链接完成订阅！',
           type: 'success',
         })
         subscribeForm.email = ''
-      }, 1000)
+      } catch (error) {
+        // Error handling is already done in the interceptor
+      } finally {
+        subscribing.value = false
+      }
     }
   })
 }

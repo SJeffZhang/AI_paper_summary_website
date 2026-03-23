@@ -10,6 +10,10 @@
       <el-skeleton :rows="5" animated style="margin-top: 20px" />
     </div>
 
+    <div v-else-if="!loading && groupedPapers.length === 0" class="empty-state">
+      <el-empty description="暂无简报数据" />
+    </div>
+
     <div v-else class="paper-feed">
       <div v-for="(group, index) in groupedPapers" :key="group.date" class="date-group">
         <el-divider content-position="left">
@@ -69,91 +73,75 @@
 <script setup>
 import { ref, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { getPapers } from '../api/papers'
+import { ElMessage } from 'element-plus'
 
 const router = useRouter()
 const route = useRoute()
 
 const currentPage = ref(Number(route.query.page) || 1)
 const pageSize = ref(10) // e.g., 10 papers per page (approx 2-3 days worth)
-const totalPapers = ref(50) // Mock total
+const totalPapers = ref(0)
 const groupedPapers = ref([])
 const loading = ref(false)
 
 // Use a request counter for race-condition protection
 let currentRequestId = 0
 
-const fetchPapers = async (page) => {
+// Group items by issue_date
+const groupPapersByDate = (items) => {
+  const groups = {}
+  items.forEach(paper => {
+    const date = paper.issue_date
+    if (!groups[date]) {
+      groups[date] = []
+    }
+    groups[date].push(paper)
+  })
+  
+  // Convert to array sorted by date descending (assuming issue_date is sortable string)
+  return Object.keys(groups)
+    .sort((a, b) => new Date(b) - new Date(a))
+    .map(date => ({
+      date,
+      items: groups[date]
+    }))
+}
+
+const fetchPapersList = async (page) => {
   loading.value = true
   const requestId = ++currentRequestId
   
-  // Simulate network delay
-  setTimeout(() => {
+  try {
+    const data = await getPapers({ page, limit: pageSize.value })
+    
     // If a newer request has been initiated, discard this response
     if (requestId !== currentRequestId) {
       return
     }
-    // Generate mock data grouped by date
-    const mockData = []
-    const startDay = 23 - (page - 1) * 2 // Fake descending dates
-    
-    // Day 1 of this page
-    mockData.push({
-      date: `2026-03-${startDay.toString().padStart(2, '0')}`,
-      items: [
-        {
-          id: page * 10 + 1,
-          arxiv_id: '2403.01234',
-          title: 'An Awesome Breakthrough in AI Models',
-          one_line_summary: '这篇论文提出了一种全新方法，让AI的响应速度提升了十倍！',
-          core_highlights: [
-            '无需增加额外算力，仅靠算法优化实现性能飞跃。',
-            '在多个主流评测榜单中刷新了SOTA记录。'
-          ]
-        },
-        {
-          id: page * 10 + 2,
-          arxiv_id: '2403.05678',
-          title: 'Understanding the Limits of Current Vision Transformers',
-          one_line_summary: '视觉模型原来存在这么大的盲区，来看看科学家是如何解决的。',
-          core_highlights: [
-            '指出了当前ViT架构在处理特定边缘情况时的致命缺陷。',
-            '提出了一种轻量级的补丁模块，完美弥补了这一问题。'
-          ]
-        }
-      ]
-    })
 
-    // Day 2 of this page
-    mockData.push({
-      date: `2026-03-${(startDay - 1).toString().padStart(2, '0')}`,
-      items: [
-        {
-          id: page * 10 + 3,
-          arxiv_id: '2403.09999',
-          title: 'Efficient Training of Large Language Models',
-          one_line_summary: '通过这种新架构，普通显卡也能训练大模型了。',
-          core_highlights: [
-            '提出了一种全新的显存管理机制，降低了70%的占用。',
-            '开源了完整的训练代码和权重。'
-          ]
-        }
-      ]
-    })
-
-    groupedPapers.value = mockData
-    totalPapers.value = 50 // Fixed mock total
-    loading.value = false
-  }, 500)
+    totalPapers.value = data.total || 0
+    groupedPapers.value = groupPapersByDate(data.items || [])
+  } catch (error) {
+    if (requestId === currentRequestId) {
+      // Error handling is already done in the interceptor, but we can reset states here
+      groupedPapers.value = []
+    }
+  } finally {
+    if (requestId === currentRequestId) {
+      loading.value = false
+    }
+  }
 }
 
 onMounted(() => {
-  fetchPapers(currentPage.value)
+  fetchPapersList(currentPage.value)
 })
 
 watch(() => route.query.page, (newPage) => {
   const pageNum = Number(newPage) || 1
   currentPage.value = pageNum
-  fetchPapers(pageNum)
+  fetchPapersList(pageNum)
 })
 
 const handlePageChange = (val) => {
