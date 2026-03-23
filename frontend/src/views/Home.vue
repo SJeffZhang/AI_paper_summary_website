@@ -1,8 +1,11 @@
 <template>
   <div class="home-page">
     <div class="page-header">
-      <h2>最新简报</h2>
-      <p class="subtitle">每日从数百篇前沿 AI 论文中精选 3-5 篇为您解读</p>
+      <h2 v-if="lang === 'cn'">最新简报</h2>
+      <h2 v-else>Latest Briefings</h2>
+      <p class="subtitle">
+        {{ lang === 'cn' ? '每日从数百篇前沿 AI 论文中精选 3-5 篇深度解读，8-12 篇值得关注' : 'Handpicked 3-5 deep dives and 8-12 key mentions from hundreds of AI papers daily' }}
+      </p>
     </div>
 
     <div v-if="loading && groupedPapers.length === 0" class="loading-state">
@@ -11,48 +14,85 @@
     </div>
 
     <div v-else-if="!loading && groupedPapers.length === 0" class="empty-state">
-      <el-empty description="暂无简报数据" />
+      <el-empty :description="lang === 'cn' ? '暂无简报数据' : 'No data available'" />
     </div>
 
     <div v-else class="paper-feed">
-      <div v-for="(group, index) in groupedPapers" :key="group.date" class="date-group">
+      <div v-for="group in groupedPapers" :key="group.date" class="date-group">
         <el-divider content-position="left">
           <span class="group-date">{{ group.date }}</span>
+          <el-link :underline="false" class="source-link" @click="$router.push(`/sources/${group.date}`)">
+            {{ lang === 'cn' ? '查看原始候选池' : 'View Candidate Pool' }}
+          </el-link>
         </el-divider>
 
-        <el-card v-for="paper in group.items" :key="paper.id" class="paper-card" shadow="hover">
-          <template #header>
-            <div class="card-header">
-              <h3 class="paper-title" @click="goToDetail(paper.id)">{{ paper.title }}</h3>
-            </div>
-          </template>
+        <!-- Focus Papers (Top 3-5) -->
+        <div class="focus-section">
+          <div class="section-title">
+            <el-tag type="danger" effect="dark" round>Focus</el-tag>
+            <span class="title-text">{{ lang === 'cn' ? '重点关注' : 'Top Recommendations' }}</span>
+          </div>
           
-          <div class="paper-content">
-            <el-alert
-              :title="paper.one_line_summary"
-              type="success"
-              :closable="false"
-              class="summary-alert"
-            />
+          <el-card v-for="paper in group.focus" :key="paper.id" class="paper-card focus-card" shadow="hover">
+            <template #header>
+              <div class="card-header">
+                <div class="title-area">
+                  <el-tag size="small" effect="plain" class="direction-tag">{{ paper.direction }}</el-tag>
+                  <h3 class="paper-title" @click="goToDetail(paper.id)">
+                    {{ lang === 'cn' ? paper.title : (paper.title_en || paper.title) }}
+                  </h3>
+                </div>
+                <div class="score-badge">
+                  <span class="score-val">{{ paper.score }}</span>
+                  <span class="score-label">PTS</span>
+                </div>
+              </div>
+            </template>
             
-            <div class="highlights">
-              <h4>✨ 核心亮点</h4>
-              <ul>
-                <li v-for="(highlight, hIndex) in paper.core_highlights.slice(0, 2)" :key="hIndex">
-                  {{ highlight }}
-                </li>
-                <li v-if="paper.core_highlights.length > 2" class="more-highlights">...</li>
-              </ul>
+            <div class="paper-content">
+              <div class="summary-box">
+                <p class="one-line">{{ lang === 'cn' ? paper.one_line_summary : paper.one_line_summary_en }}</p>
+              </div>
+              
+              <div class="highlights">
+                <div class="h-title">✨ {{ lang === 'cn' ? '核心亮点' : 'Highlights' }}</div>
+                <ul>
+                  <li v-for="(h, idx) in (lang === 'cn' ? paper.core_highlights : paper.core_highlights_en)" :key="idx">
+                    {{ h }}
+                  </li>
+                </ul>
+              </div>
             </div>
+
+            <div class="card-footer">
+              <el-button type="primary" @click="goToDetail(paper.id)">
+                {{ lang === 'cn' ? '解读全文' : 'Read Full Brief' }}
+              </el-button>
+              <el-link :href="'https://arxiv.org/abs/' + paper.arxiv_id" target="_blank" type="info" :underline="false">
+                arXiv:{{ paper.arxiv_id }}
+              </el-link>
+            </div>
+          </el-card>
+        </div>
+
+        <!-- Watching Papers (Next 8-12) -->
+        <div v-if="group.watching.length > 0" class="watching-section">
+          <div class="section-title">
+            <el-tag type="info" effect="dark" round>Watching</el-tag>
+            <span class="title-text">{{ lang === 'cn' ? '也值得关注' : 'Also Worth Watching' }}</span>
           </div>
 
-          <div class="card-footer">
-            <el-button type="primary" @click="goToDetail(paper.id)">阅读全文</el-button>
-            <el-link :href="'https://arxiv.org/abs/' + paper.arxiv_id" target="_blank" type="info" :underline="false">
-              查看原论文
-            </el-link>
+          <div class="watching-list">
+            <div v-for="paper in group.watching" :key="paper.id" class="watching-item" @click="goToDetail(paper.id)">
+              <div class="wi-header">
+                <span class="wi-direction">[{{ paper.direction }}]</span>
+                <span class="wi-title">{{ lang === 'cn' ? paper.title : (paper.title_en || paper.title) }}</span>
+                <span class="wi-score">{{ paper.score }}</span>
+              </div>
+              <p class="wi-summary">{{ lang === 'cn' ? paper.one_line_summary : paper.one_line_summary_en }}</p>
+            </div>
           </div>
-        </el-card>
+        </div>
       </div>
 
       <div class="pagination-area">
@@ -71,40 +111,42 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, inject } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { getPapers } from '../api/papers'
-import { ElMessage } from 'element-plus'
 
+const lang = inject('lang')
 const router = useRouter()
 const route = useRoute()
 
 const currentPage = ref(Number(route.query.page) || 1)
-const pageSize = ref(10) // e.g., 10 papers per page (approx 2-3 days worth)
+const pageSize = ref(17) // Approx one day's worth (5 + 12)
 const totalPapers = ref(0)
 const groupedPapers = ref([])
 const loading = ref(false)
 
-// Use a request counter for race-condition protection
 let currentRequestId = 0
 
-// Group items by issue_date
 const groupPapersByDate = (items) => {
   const groups = {}
   items.forEach(paper => {
     const date = paper.issue_date
     if (!groups[date]) {
-      groups[date] = []
+      groups[date] = { focus: [], watching: [] }
     }
-    groups[date].push(paper)
+    if (paper.category === 'focus') {
+      groups[date].focus.push(paper)
+    } else if (paper.category === 'watching') {
+      groups[date].watching.push(paper)
+    }
   })
   
-  // Convert to array sorted by date descending (assuming issue_date is sortable string)
   return Object.keys(groups)
     .sort((a, b) => new Date(b) - new Date(a))
     .map(date => ({
       date,
-      items: groups[date]
+      focus: groups[date].focus.sort((a, b) => b.score - a.score),
+      watching: groups[date].watching.sort((a, b) => b.score - a.score)
     }))
 }
 
@@ -114,23 +156,14 @@ const fetchPapersList = async (page) => {
   
   try {
     const data = await getPapers({ page, limit: pageSize.value })
-    
-    // If a newer request has been initiated, discard this response
-    if (requestId !== currentRequestId) {
-      return
-    }
+    if (requestId !== currentRequestId) return
 
     totalPapers.value = data.total || 0
     groupedPapers.value = groupPapersByDate(data.items || [])
   } catch (error) {
-    if (requestId === currentRequestId) {
-      // Error handling is already done in the interceptor, but we can reset states here
-      groupedPapers.value = []
-    }
+    if (requestId === currentRequestId) groupedPapers.value = []
   } finally {
-    if (requestId === currentRequestId) {
-      loading.value = false
-    }
+    if (requestId === currentRequestId) loading.value = false
   }
 }
 
@@ -168,22 +201,52 @@ const goToDetail = (id) => {
 .subtitle {
   margin: 8px 0 0 0;
   color: #909399;
-  font-size: 14px;
+  font-size: 15px;
 }
 
 .date-group {
-  margin-bottom: 40px;
+  margin-bottom: 50px;
 }
 
 .group-date {
   font-size: 18px;
   font-weight: bold;
-  color: #409EFF;
+  color: #303133;
+}
+
+.source-link {
+  margin-left: 15px;
+  font-size: 13px;
+  font-weight: normal;
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.title-text {
+  font-size: 18px;
+  font-weight: bold;
+  color: #303133;
+}
+
+.focus-section {
+  margin-bottom: 40px;
 }
 
 .paper-card {
-  margin-bottom: 20px;
-  border-radius: 8px;
+  margin-bottom: 25px;
+  border-radius: 12px;
+  border: 1px solid #ebeef5;
+  transition: all 0.3s cubic-bezier(.25,.8,.25,1);
+}
+
+.focus-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 10px 20px rgba(0,0,0,0.05);
 }
 
 .card-header {
@@ -192,14 +255,19 @@ const goToDetail = (id) => {
   align-items: flex-start;
 }
 
+.title-area {
+  flex: 1;
+}
+
+.direction-tag {
+  margin-bottom: 8px;
+}
+
 .paper-title {
   margin: 0;
-  font-size: 18px;
-  color: #303133;
+  font-size: 20px;
+  color: #1a1a1a;
   cursor: pointer;
-  transition: color 0.2s;
-  flex-grow: 1;
-  padding-right: 15px;
   line-height: 1.4;
 }
 
@@ -207,44 +275,124 @@ const goToDetail = (id) => {
   color: #409eff;
 }
 
-.summary-alert {
-  margin-bottom: 15px;
+.score-badge {
+  background: #fdf6ec;
+  border: 1px solid #faecd8;
+  color: #e6a23c;
+  padding: 5px 10px;
+  border-radius: 8px;
+  text-align: center;
+  margin-left: 15px;
 }
 
-.summary-alert :deep(.el-alert__title) {
-  font-size: 15px;
+.score-val {
+  display: block;
+  font-size: 18px;
   font-weight: bold;
-  line-height: 1.5;
 }
 
-.highlights h4 {
-  margin: 0 0 10px 0;
+.score-label {
+  font-size: 10px;
+  opacity: 0.8;
+}
+
+.summary-box {
+  background-color: #f0f9eb;
+  padding: 15px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  border-left: 4px solid #67c23a;
+}
+
+.one-line {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+  color: #2c3e50;
+  line-height: 1.6;
+}
+
+.highlights .h-title {
+  font-weight: bold;
   color: #606266;
+  margin-bottom: 10px;
 }
 
 .highlights ul {
   margin: 0;
   padding-left: 20px;
   color: #606266;
-  line-height: 1.6;
-}
-
-.more-highlights {
-  list-style: none;
-  color: #909399;
+  line-height: 1.7;
 }
 
 .card-footer {
-  margin-top: 20px;
+  margin-top: 25px;
   display: flex;
   align-items: center;
-  gap: 15px;
+  gap: 20px;
+}
+
+.watching-list {
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #ebeef5;
+  overflow: hidden;
+}
+
+.watching-item {
+  padding: 15px 20px;
+  border-bottom: 1px solid #f0f2f5;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.watching-item:last-child {
+  border-bottom: none;
+}
+
+.watching-item:hover {
+  background-color: #f9fbff;
+}
+
+.wi-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 5px;
+}
+
+.wi-direction {
+  color: #909399;
+  font-size: 13px;
+  font-family: monospace;
+}
+
+.wi-title {
+  font-weight: bold;
+  color: #303133;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wi-score {
+  font-size: 12px;
+  color: #e6a23c;
+  font-weight: bold;
+}
+
+.wi-summary {
+  margin: 0;
+  font-size: 14px;
+  color: #606266;
+  padding-left: 0;
 }
 
 .pagination-area {
   display: flex;
   justify-content: center;
-  margin-top: 40px;
-  padding-bottom: 20px;
+  margin-top: 50px;
+  padding-bottom: 40px;
 }
 </style>

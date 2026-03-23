@@ -1,7 +1,9 @@
 <template>
   <div class="detail-page">
     <div class="page-header">
-      <el-button :icon="Back" @click="$router.back()">返回</el-button>
+      <el-button :icon="Back" @click="$router.back()">
+        {{ lang === 'cn' ? '返回' : 'Back' }}
+      </el-button>
     </div>
 
     <div v-if="loading" class="loading-state">
@@ -9,50 +11,57 @@
     </div>
 
     <div v-else-if="!loading && !paper" class="empty-state" style="margin-top: 50px;">
-      <el-empty description="未找到相关论文或数据加载失败" />
+      <el-empty :description="lang === 'cn' ? '未找到相关论文' : 'Paper not found'" />
     </div>
 
     <div v-else-if="paper" class="paper-article">
-      <h1 class="article-title">{{ paper.title }}</h1>
+      <div class="category-badge">
+        <el-tag :type="paper.category === 'focus' ? 'danger' : 'info'" effect="dark">
+          {{ paper.category === 'focus' ? 'Focus' : 'Watching' }}
+        </el-tag>
+        <el-tag type="warning" effect="plain" class="score-tag">Score: {{ paper.score }}</el-tag>
+      </div>
+      
+      <h1 class="article-title">
+        {{ lang === 'cn' ? paper.title : (paper.title_en || paper.title) }}
+      </h1>
+      
       <div class="article-meta">
-        <el-tag size="small" type="info">{{ paper.issue_date }}</el-tag>
-        <span class="authors">作者: {{ paper.authors.join(', ') }}</span>
+        <el-tag size="small" type="info">{{ paper.direction }}</el-tag>
+        <span class="authors">{{ lang === 'cn' ? '作者' : 'Authors' }}: {{ paper.authors.join(', ') }}</span>
       </div>
 
       <div class="ai-summary-section">
-        <el-alert
-          title="💡 一句话总结"
-          :description="paper.one_line_summary"
-          type="success"
-          :closable="false"
-          class="highlight-alert"
-        />
+        <div class="section-block">
+          <h3 class="s-title">💡 {{ lang === 'cn' ? '一句话总结' : 'One-line Summary' }}</h3>
+          <p class="summary-text">{{ lang === 'cn' ? paper.one_line_summary : paper.one_line_summary_en }}</p>
+        </div>
 
         <div class="section-block">
-          <h3>✨ 核心亮点</h3>
-          <ul>
-            <li v-for="(item, index) in paper.core_highlights" :key="index">
+          <h3 class="s-title">✨ {{ lang === 'cn' ? '核心亮点' : 'Core Highlights' }}</h3>
+          <ul class="highlights-list">
+            <li v-for="(item, index) in (lang === 'cn' ? paper.core_highlights : paper.core_highlights_en)" :key="index">
               {{ item }}
             </li>
           </ul>
         </div>
 
         <div class="section-block">
-          <h3>🚀 应用场景</h3>
-          <p>{{ paper.application_scenarios }}</p>
+          <h3 class="s-title">🚀 {{ lang === 'cn' ? '应用场景' : 'Application Scenarios' }}</h3>
+          <p class="scenario-text">{{ lang === 'cn' ? paper.application_scenarios : paper.application_scenarios_en }}</p>
         </div>
       </div>
 
       <div class="original-section">
         <el-collapse>
-          <el-collapse-item title="查看原论文英文摘要 (Abstract)" name="1">
+          <el-collapse-item :title="lang === 'cn' ? '查看原论文摘要 (Abstract)' : 'View Original Abstract'" name="1">
             <p class="abstract-text">{{ paper.abstract }}</p>
             <div class="pdf-link">
               <el-button type="primary" plain tag="a" :href="paper.pdf_url" target="_blank" :icon="Document">
-                下载 PDF 原文
+                {{ lang === 'cn' ? '下载 PDF 原文' : 'Download PDF' }}
               </el-button>
               <el-link :href="'https://arxiv.org/abs/' + paper.arxiv_id" target="_blank" style="margin-left:15px">
-                在 arXiv 上查看
+                arXiv:{{ paper.arxiv_id }}
               </el-link>
             </div>
           </el-collapse-item>
@@ -63,12 +72,12 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, inject } from 'vue'
 import { useRoute } from 'vue-router'
 import { Back, Document } from '@element-plus/icons-vue'
 import { getPaperDetail } from '../api/papers'
-import { ElMessage } from 'element-plus'
 
+const lang = inject('lang')
 const route = useRoute()
 const loading = ref(false)
 const paper = ref(null)
@@ -79,7 +88,6 @@ const fetchDetail = async (id) => {
     const data = await getPaperDetail(id)
     paper.value = data
   } catch (error) {
-    // Error is handled in interceptor
     paper.value = null
   } finally {
     loading.value = false
@@ -93,14 +101,24 @@ onMounted(() => {
 
 <style scoped>
 .page-header {
-  margin-bottom: 20px;
+  margin-bottom: 25px;
+}
+
+.category-badge {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 15px;
+}
+
+.score-tag {
+  font-weight: bold;
 }
 
 .article-title {
-  font-size: 24px;
-  color: #303133;
+  font-size: 28px;
+  color: #1a1a1a;
   margin-top: 0;
-  margin-bottom: 15px;
+  margin-bottom: 20px;
   line-height: 1.4;
 }
 
@@ -108,68 +126,75 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 15px;
-  margin-bottom: 30px;
-  color: #909399;
-  font-size: 14px;
+  margin-bottom: 35px;
+  color: #606266;
+  font-size: 15px;
 }
 
 .ai-summary-section {
   background-color: #ffffff;
-  padding: 30px;
-  border-radius: 8px;
-  box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.05);
-  margin-bottom: 30px;
-}
-
-.highlight-alert {
-  margin-bottom: 25px;
-}
-
-.highlight-alert :deep(.el-alert__title) {
-  font-size: 16px;
-  font-weight: bold;
-}
-
-.highlight-alert :deep(.el-alert__description) {
-  font-size: 15px;
-  margin-top: 8px;
-  line-height: 1.5;
+  padding: 40px;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+  margin-bottom: 35px;
+  border: 1px solid #f0f2f5;
 }
 
 .section-block {
-  margin-bottom: 25px;
+  margin-bottom: 35px;
 }
 
-.section-block h3 {
+.section-block:last-child {
+  margin-bottom: 0;
+}
+
+.s-title {
   color: #303133;
+  font-size: 20px;
+  margin-bottom: 15px;
+  font-weight: 600;
+}
+
+.summary-text {
   font-size: 18px;
-  margin-bottom: 12px;
+  line-height: 1.6;
+  color: #2c3e50;
+  font-weight: 500;
+  background: #f0f9eb;
+  padding: 15px 20px;
+  border-radius: 8px;
+  border-left: 4px solid #67c23a;
 }
 
-.section-block ul {
+.highlights-list {
   padding-left: 20px;
-  color: #606266;
+  color: #4a4a4a;
   line-height: 1.8;
-  font-size: 15px;
+  font-size: 16px;
 }
 
-.section-block p {
-  color: #606266;
+.scenario-text {
+  color: #4a4a4a;
   line-height: 1.8;
-  font-size: 15px;
+  font-size: 16px;
 }
 
 .original-section {
   background-color: #ffffff;
-  border-radius: 8px;
-  padding: 10px 20px;
+  border-radius: 12px;
+  padding: 15px 25px;
+  border: 1px solid #f0f2f5;
 }
 
 .abstract-text {
   color: #606266;
-  line-height: 1.6;
+  line-height: 1.7;
   font-style: italic;
-  margin-bottom: 20px;
+  margin-bottom: 25px;
+  font-size: 15px;
+  background: #fafafa;
+  padding: 20px;
+  border-radius: 8px;
 }
 
 .pdf-link {

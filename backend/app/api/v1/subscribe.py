@@ -121,13 +121,18 @@ def verify_subscription(token: str = Query(...), db: Session = Depends(get_db)):
 @router.post("/unsubscribe", response_model=ResponseModel)
 def unsubscribe(req: UnsubscribeRequest, db: Session = Depends(get_db)):
     """
-    Secure unsubscribe using unique token
+    Secure unsubscribe using unique token (v2.0).
+    Enforces 24h expiry check as per PRD.
     """
     subscriber = db.query(Subscriber).filter(Subscriber.unsubscribe_token == req.token).first()
     
     if not subscriber:
-        raise HTTPException(status_code=400, detail="退订链接无效或已过期，请确认链接完整性。")
+        raise HTTPException(status_code=400, detail="退订链接无效，请确认链接完整性。")
         
+    # Security: Token expiry check (24h) as per PRD
+    if subscriber.token_expires_at and subscriber.token_expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="退订链接已过期（24小时内有效），请联系管理员或重新订阅。")
+
     subscriber.status = 2 # unsubscribed
     db.commit()
     

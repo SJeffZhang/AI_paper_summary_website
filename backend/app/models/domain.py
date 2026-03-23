@@ -9,11 +9,20 @@ class Paper(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     arxiv_id = Column(String(50), unique=True, index=True, nullable=False)
     title = Column(String(500), nullable=False)
+    title_en = Column(String(500), nullable=True) # PRD v2.0
     authors = Column(JSON, nullable=False)
     abstract = Column(Text, nullable=False)
     pdf_url = Column(String(255), nullable=False)
     upvotes = Column(Integer, default=0)
     arxiv_publish_date = Column(Date, index=True, nullable=False)
+    
+    # --- PRD v2.0 New Fields ---
+    score = Column(Integer, default=0)
+    score_reasons = Column(JSON, nullable=True) # e.g. {"top_org": 20, "has_code": 20}
+    category = Column(String(20), index=True, nullable=True) # focus, watching, candidate
+    direction = Column(String(50), index=True, nullable=True) # Agent, Inference, etc.
+    # ---------------------------
+    
     created_at = Column(DateTime, server_default=func.now())
 
     summaries = relationship("PaperSummary", back_populates="paper", cascade="all, delete-orphan")
@@ -24,9 +33,18 @@ class PaperSummary(Base):
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     paper_id = Column(Integer, ForeignKey("paper.id", ondelete="CASCADE"), nullable=False)
-    one_line_summary = Column(String(255), nullable=False)
-    core_highlights = Column(JSON, nullable=False)
-    application_scenarios = Column(Text, nullable=False)
+    
+    # --- PRD v2.0 Bilingual Fields ---
+    one_line_summary = Column(String(255), nullable=False) # CN
+    one_line_summary_en = Column(String(255), nullable=True) # EN
+    
+    core_highlights = Column(JSON, nullable=False) # CN JSON array
+    core_highlights_en = Column(JSON, nullable=True) # EN JSON array
+    
+    application_scenarios = Column(Text, nullable=False) # CN
+    application_scenarios_en = Column(Text, nullable=True) # EN
+    # ---------------------------------
+
     issue_date = Column(Date, index=True, nullable=False)
     created_at = Column(DateTime, server_default=func.now())
 

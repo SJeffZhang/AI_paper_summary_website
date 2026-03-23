@@ -52,12 +52,12 @@ class AIProcessor:
             print(f"LLM call failed: {e}")
             raise e
 
-    def run_editor(self, candidate_papers: List[Dict[str, Any]]) -> str:
+    def run_editor(self, candidate_papers: List[Dict[str, Any]], min_count: int = 3, max_count: int = 5) -> str:
         """
-        Step 1: Editor Agent selects 3-5 papers and creates editorial briefs.
+        Step 1: Editor Agent selects a specified range of papers and creates editorial briefs.
         """
         # Format papers into a readable Markdown list for the LLM
-        input_text = "# Candidate Papers\n\n"
+        input_text = f"# Candidate Papers (Please select between {min_count} and {max_count} papers)\n\n"
         for p in candidate_papers:
             input_text += f"## [{p['arxiv_id']}] {p['title']}\n"
             input_text += f"- **Upvotes**: {p['upvotes']}\n"
@@ -67,6 +67,7 @@ class AIProcessor:
         
         # Validation: Extract IDs and check against candidates
         selected_ids = re.findall(r"## 论文: \[(.*?)\]", output)
+        
         # 1. Uniqueness check
         if len(selected_ids) != len(set(selected_ids)):
             raise ValueError(f"Editor produced duplicate IDs: {selected_ids}")
@@ -75,8 +76,8 @@ class AIProcessor:
         
         # 2. Source & Count check
         valid_ids = [id_ for id_ in selected_ids if id_ in candidate_ids]
-        if not (3 <= len(valid_ids) <= 5):
-            raise ValueError(f"Editor selected {len(valid_ids)} papers, expected 3-5. Output: {output[:200]}...")
+        if not (min_count <= len(valid_ids) <= max_count):
+            raise ValueError(f"Editor selected {len(valid_ids)} papers, expected {min_count}-{max_count}. Output: {output[:200]}...")
             
         if len(valid_ids) != len(selected_ids):
             # Detect hallucinated IDs
@@ -154,8 +155,8 @@ class AIProcessor:
 
     def parse_final_summaries(self, writer_output: str, rejected_ids: List[str]) -> List[Dict[str, Any]]:
         """
-        Final step: Parse the Markdown from Writer and extract structured data, excluding rejected papers.
-        Strict validation: all required fields must be present and non-empty.
+        Final step: Parse the Markdown from Writer and extract bilingual (CN/EN) structured data.
+        Strict validation: All CN and EN fields must be present and non-empty.
         """
         # Split by ## [arxiv_id]
         segments = re.split(r"## \[(.*?)\]", writer_output)
@@ -170,28 +171,41 @@ class AIProcessor:
             if arxiv_id in rejected_set:
                 continue
                 
-            # Extract fields with strict regex
-            one_line_match = re.search(r"- \*\*一句话总结\*\*: (.*)", content)
-            highlights_block = re.search(r"- \*\*核心亮点\*\*:([\s\S]*?)(?=- \*\*|$)", content)
-            scenarios_match = re.search(r"- \*\*应用场景\*\*: (.*)", content)
+            # --- Extract CN Fields ---
+            one_line_cn_match = re.search(r"- \*\*一句话总结\*\*: (.*)", content)
+            highlights_cn_block = re.search(r"- \*\*核心亮点\*\*:([\s\S]*?)(?=- \*\*|$)", content)
+            scenarios_cn_match = re.search(r"- \*\*应用场景\*\*: (.*)", content)
             
-            if not one_line_match or not highlights_block or not scenarios_match:
-                raise ValueError(f"Paper {arxiv_id} summary structure is incomplete.")
+            # --- Extract EN Fields ---
+            one_line_en_match = re.search(r"- \*\*One-line Summary\*\*: (.*)", content)
+            highlights_en_block = re.search(r"- \*\*Core Highlights\*\*:([\s\S]*?)(?=- \*\*|$)", content)
+            scenarios_en_match = re.search(r"- \*\*Application Scenarios\*\*: (.*)", content)
+            
+            # Strict Validation: Check all matches exist
+            if not all([one_line_cn_match, highlights_cn_block, scenarios_cn_match, 
+                       one_line_en_match, highlights_en_block, scenarios_en_match]):
+                raise ValueError(f"Paper {arxiv_id} summary structure is incomplete (missing CN or EN sections).")
 
-            one_line = one_line_match.group(1).strip()
-            scenarios = scenarios_match.group(1).strip()
+            # Extract and validate non-empty content
+            one_line_cn = one_line_cn_match.group(1).strip()
+            one_line_en = one_line_en_match.group(1).strip()
+            scenarios_cn = scenarios_cn_match.group(1).strip()
+            scenarios_en = scenarios_en_match.group(1).strip()
             
-            highlights = re.findall(r"  - (.*)", highlights_block.group(1))
-            highlights = [h.strip() for h in highlights if h.strip()]
-            
-            if not one_line or not scenarios or not highlights:
-                raise ValueError(f"Paper {arxiv_id} summary has empty required fields.")
-            
+            highlights_cn = [h.strip() for h in re.findall(r"  - (.*)", highlights_cn_block.group(1)) if h.strip()]
+            highlights_en = [h.strip() for h in re.findall(r"  - (.*)", highlights_en_block.group(1)) if h.strip()]
+
+            if not all([one_line_cn, one_line_en, scenarios_cn, scenarios_en, highlights_cn, highlights_en]):
+                raise ValueError(f"Paper {arxiv_id} has empty required CN or EN fields.")
+
             results.append({
                 "arxiv_id": arxiv_id,
-                "one_line_summary": one_line,
-                "core_highlights": highlights,
-                "application_scenarios": scenarios
+                "one_line_summary": one_line_cn,
+                "one_line_summary_en": one_line_en,
+                "core_highlights": highlights_cn,
+                "core_highlights_en": highlights_en,
+                "application_scenarios": scenarios_cn,
+                "application_scenarios_en": scenarios_en
             })
             
         return results

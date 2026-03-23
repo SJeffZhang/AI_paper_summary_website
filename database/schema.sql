@@ -1,4 +1,4 @@
--- Database Initialization Script for AI Paper Summary Website
+-- Database Initialization Script for AI Paper Summary Website - v2.0
 -- Character Set: utf8mb4
 
 SET NAMES utf8mb4;
@@ -11,15 +11,25 @@ CREATE TABLE IF NOT EXISTS `paper` (
   `id` INT NOT NULL AUTO_INCREMENT,
   `arxiv_id` VARCHAR(50) NOT NULL,
   `title` VARCHAR(500) NOT NULL,
+  `title_en` VARCHAR(500) DEFAULT NULL, -- PRD v2.0
   `authors` JSON NOT NULL,
   `abstract` TEXT NOT NULL,
   `pdf_url` VARCHAR(255) NOT NULL,
   `upvotes` INT DEFAULT 0,
   `arxiv_publish_date` DATE NOT NULL,
+  
+  -- PRD v2.0 Fields
+  `score` INT DEFAULT 0,
+  `score_reasons` JSON DEFAULT NULL,
+  `category` VARCHAR(20) DEFAULT NULL COMMENT 'focus, watching, candidate',
+  `direction` VARCHAR(50) DEFAULT NULL COMMENT 'e.g. Agent, Inference',
+  
   `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_arxiv_id` (`arxiv_id`),
-  INDEX `idx_publish_date` (`arxiv_publish_date`)
+  INDEX `idx_publish_date` (`arxiv_publish_date`),
+  INDEX `idx_category` (`category`),
+  INDEX `idx_direction` (`direction`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ----------------------------
@@ -28,9 +38,15 @@ CREATE TABLE IF NOT EXISTS `paper` (
 CREATE TABLE IF NOT EXISTS `paper_summary` (
   `id` INT NOT NULL AUTO_INCREMENT,
   `paper_id` INT NOT NULL,
-  `one_line_summary` VARCHAR(255) NOT NULL,
-  `core_highlights` JSON NOT NULL,
-  `application_scenarios` TEXT NOT NULL,
+  
+  -- PRD v2.0 Bilingual Fields
+  `one_line_summary` VARCHAR(255) NOT NULL, -- CN
+  `one_line_summary_en` VARCHAR(255) DEFAULT NULL, -- EN
+  `core_highlights` JSON NOT NULL, -- CN Array
+  `core_highlights_en` JSON DEFAULT NULL, -- EN Array
+  `application_scenarios` TEXT NOT NULL, -- CN
+  `application_scenarios_en` TEXT DEFAULT NULL, -- EN
+  
   `issue_date` DATE NOT NULL,
   `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),

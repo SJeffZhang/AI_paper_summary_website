@@ -3,14 +3,20 @@
     <el-header class="app-header">
       <div class="header-content">
         <div class="logo-area">
-          <h1 class="logo-text" @click="$router.push('/')">AI 论文简报</h1>
+          <h1 class="logo-text" @click="$router.push('/')">
+            {{ lang === 'cn' ? 'AI 论文简报' : 'AI Paper Brief' }}
+          </h1>
         </div>
         <el-menu mode="horizontal" :router="true" class="nav-menu" :ellipsis="false" default-active="/">
-          <el-menu-item index="/">首页</el-menu-item>
+          <el-menu-item index="/">{{ lang === 'cn' ? '首页' : 'Home' }}</el-menu-item>
         </el-menu>
         <div class="action-area">
+          <el-radio-group v-model="lang" size="small" class="lang-switch" @change="handleLangChange">
+            <el-radio-button label="cn">中文</el-radio-button>
+            <el-radio-button label="en">EN</el-radio-button>
+          </el-radio-group>
           <el-button type="primary" plain @click="subscribeDialogVisible = true">
-            <el-icon><Message /></el-icon> 邮件订阅
+            <el-icon><Message /></el-icon> {{ lang === 'cn' ? '邮件订阅' : 'Subscribe' }}
           </el-button>
         </div>
       </div>
@@ -18,30 +24,30 @@
 
     <el-main class="app-main">
       <div class="main-content">
-        <router-view />
+        <router-view :key="lang" />
       </div>
     </el-main>
 
     <el-footer class="app-footer">
-      <p>© 2026 AI 论文简报. All rights reserved.</p>
+      <p>© 2026 {{ lang === 'cn' ? 'AI 论文简报' : 'AI Paper Brief' }}. All rights reserved.</p>
     </el-footer>
 
     <!-- Subscription Dialog -->
-    <el-dialog v-model="subscribeDialogVisible" title="订阅每日简报" width="400px" center>
+    <el-dialog v-model="subscribeDialogVisible" :title="lang === 'cn' ? '订阅每日简报' : 'Subscribe Daily Brief'" width="400px" center>
       <el-form :model="subscribeForm" :rules="rules" ref="subscribeFormRef" @submit.prevent="handleSubscribe">
         <el-form-item prop="email">
           <el-input 
             v-model="subscribeForm.email" 
-            placeholder="请输入您的邮箱地址"
+            :placeholder="lang === 'cn' ? '请输入您的邮箱地址' : 'Please enter your email'"
             :prefix-icon="Message"
           />
         </el-form-item>
       </el-form>
       <template #footer>
         <span class="dialog-footer">
-          <el-button @click="subscribeDialogVisible = false">取消</el-button>
+          <el-button @click="subscribeDialogVisible = false">{{ lang === 'cn' ? '取消' : 'Cancel' }}</el-button>
           <el-button type="primary" @click="handleSubscribe" :loading="subscribing">
-            订阅
+            {{ lang === 'cn' ? '订阅' : 'Subscribe' }}
           </el-button>
         </span>
       </template>
@@ -50,10 +56,17 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, provide } from 'vue'
 import { Message } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { subscribeEmail } from './api/papers'
+
+const lang = ref(localStorage.getItem('lang') || 'cn')
+provide('lang', lang)
+
+const handleLangChange = (val) => {
+  localStorage.setItem('lang', val)
+}
 
 const subscribeDialogVisible = ref(false)
 const subscribing = ref(false)
@@ -79,7 +92,7 @@ const handleSubscribe = async () => {
         await subscribeEmail(subscribeForm.email)
         subscribeDialogVisible.value = false
         ElMessage({
-          message: '验证邮件已发送，请前往邮箱点击确认链接完成订阅！',
+          message: lang.value === 'cn' ? '验证邮件已发送，请前往邮箱点击确认链接完成订阅！' : 'Verification email sent! Please check your inbox to confirm.',
           type: 'success',
         })
         subscribeForm.email = ''
@@ -115,7 +128,7 @@ body {
 
 .header-content {
   width: 100%;
-  max-width: 800px;
+  max-width: 1000px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -127,12 +140,24 @@ body {
   color: #409eff;
   cursor: pointer;
   margin: 0;
+  white-space: nowrap;
 }
 
 .nav-menu {
   flex-grow: 1;
   justify-content: center;
   border-bottom: none !important;
+  margin: 0 20px;
+}
+
+.action-area {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.lang-switch {
+  margin-right: 5px;
 }
 
 .app-main {
@@ -143,7 +168,7 @@ body {
 
 .main-content {
   width: 100%;
-  max-width: 800px;
+  max-width: 1000px;
 }
 
 .app-footer {
