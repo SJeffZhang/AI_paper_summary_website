@@ -258,6 +258,76 @@ When continuing work in this repository, read this file first.
     - `paper` omits live fields such as `pdf_url`, `upvotes`, and `created_at`
     - `paper_summary` omits `created_at`
     - `subscriber` omits `created_at` and `updated_at`
+
+## Latest Review Follow-up (2026-03-25, PRD v2.25 code re-review)
+- Re-read the current `Detailed_PRD.md` v2.25 before reviewing the new large code update, per the user's standing rule.
+- Minimal validation completed:
+  - backend startup passes with `cd backend && ./venv/bin/python -c "from app.main import app; print(app.title)"`
+  - frontend production build passes with `cd frontend && npm run build -- --outDir /tmp/ai-paper-summary-frontend-build`
+  - Vite still warns that the main production chunk is larger than 500 kB
+- The latest v2.25 rewrite materially improved truth alignment:
+  - `paper` / `paper_summary` / `subscriber` / `system_task_log` now match the new physical schema direction much better
+  - the scorer now centralizes thresholds/whitelists/taxonomy rules in `backend/app/core/specs.py`
+  - the pipeline now persists full issue snapshots into `paper_summary` and performs promotion/demotion on the summary snapshot layer
+  - `/api/v1/papers` list/detail now read from the snapshot model and expose `title_zh`, `title_original`, `candidate_reason`, `direction`, and bilingual narrative fields
+  - `Sources.vue` / `Topic.vue` now use server-side filtering and pagination instead of the older fixed local top-100 filtering
+- Remaining review findings:
+  - The bilingual title contract is still not truly implemented:
+    - the crawler writes English titles into both `title_zh` and `title_original`
+    - no later pipeline/AI step overwrites `title_zh` with a real Chinese localized title
+    - the CN/EN switch therefore only changes summaries, not the paper titles themselves
+  - The one-time migration still leaves a token-expiry hole for migrated subscribers:
+    - `database/migrate_v225.sql` derives `unsub_expires_at` by copying `verify_expires_at`
+    - already-verified legacy subscribers are likely to have `verify_expires_at = NULL`
+    - runtime `POST /api/v1/unsubscribe` only rejects expired tokens when `unsub_expires_at` exists, so migrated rows can retain effectively non-expiring unsubscribe tokens
+  - The latest PRD wording says rate limiting applies to `/subscribe`-related write interfaces, but the code still only rate-limits `POST /api/v1/subscribe`; `POST /api/v1/unsubscribe` is not limited
+
+## Latest Review Follow-up (2026-03-25, post-fix re-review)
+- Re-reviewed the latest code after the user claimed fixes for:
+  - localized `title_zh`
+  - migration/runtime unsubscribe-token expiry enforcement
+  - write-path rate-limit coverage
+- Independent minimal validation completed:
+  - `cd backend && ./venv/bin/python -m compileall app scripts` passes
+  - `cd backend && ./venv/bin/python -c "from app.main import app; print(app.title)"` passes
+  - `cd frontend && npm run build -- --outDir /tmp/ai-paper-summary-frontend-build` passes
+  - Vite still warns about a large main production chunk
+- Confirmed fixes:
+  - crawler no longer writes English titles directly into `title_zh`
+  - pipeline now calls `AIProcessor.localize_titles()` before upserting papers
+  - a historical repair script now exists at `backend/scripts/backfill_title_zh.py`
+  - `database/migrate_v225.sql` now backfills `unsub_expires_at` more defensively
+  - runtime unsubscribe now treats missing expiry as invalid
+  - `POST /api/v1/unsubscribe` now uses the same IP write-rate limiter as `POST /api/v1/subscribe`
+- Remaining findings after this re-review:
+  - the title-localization validator still only checks for non-empty strings and exact ID coverage; it does not verify that `title_zh` is actually localized Chinese rather than an unchanged English title
+  - the unsubscribe lifecycle is still broken for long-lived active subscribers:
+    - active subscribers keep their original `unsub_token` / `unsub_expires_at`
+    - `POST /api/v1/subscribe` returns early for `status == 1` and does not rotate or reissue those fields
+    - once the original 24h window expires, there is no in-product path to obtain a fresh unsubscribe token
+
+## Latest Review Follow-up (2026-03-25, title-localization + active-unsubscribe refresh re-review)
+- Re-reviewed the current code after the user claimed fixes for:
+  - active-subscriber unsubscribe-token refresh in `backend/app/api/v1/subscribe.py`
+  - strong Chinese-title validation in `backend/app/services/ai_processor.py`
+- Verified again:
+  - `cd backend && ./venv/bin/python -m compileall app scripts` passes
+  - `cd backend && ./venv/bin/python -c "from app.main import app; print(app.title)"` passes
+- Confirmed fixes:
+  - active subscribers now receive a newly rotated `unsub_token` and `unsub_expires_at` on repeat subscribe attempts, and a fresh management/unsubscribe link is sent
+  - title localization now requires:
+    - valid JSON object output
+    - exact ID coverage
+    - non-empty localized titles
+    - at least one Chinese character in each `title_zh`
+    - `title_zh` must not equal `title_original`
+    - retry feedback now includes the concrete validation failure
+- Current review conclusion:
+  - no new substantive findings identified in this re-review
+  - remaining validation gaps are still operational, not design/code-review blockers:
+    - real email delivery was not exercised
+    - MySQL migration and backfill scripts were not executed against a live database
+    - LLM-powered title localization was not end-to-end exercised
     - `system_task_log` omits `started_at` and `finished_at`
     - `category` is described as `Enum`, while the live schema uses `VARCHAR(20)`
   - The timeout section is still incomplete relative to the running code:
