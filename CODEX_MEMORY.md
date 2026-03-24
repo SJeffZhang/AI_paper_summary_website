@@ -589,3 +589,119 @@ When continuing work in this repository, read this file first.
   - The "top institution" signal is still not independently reproducible:
     - section 3.1 references an internal "40+ institution list"
     - but the actual whitelist is not enumerated in the PRD, so separate implementations could diverge
+
+## Latest PRD-Only Review (2026-03-24, v2.19)
+- Re-reviewed `Detailed_PRD.md` v2.19 strictly as a PRD/design artifact.
+- v2.19 closes the three specific auditability gaps called out in v2.18:
+  - block splitting now includes an explicit `zip(blocks[1::2], blocks[2::2])` reconstruction rule
+  - candidate provenance now has a physical `candidate_reason` field
+  - the top-institution whitelist is now explicitly enumerated
+- No new P0-grade break was found in this pass.
+- Remaining design findings:
+  - The block parser still lacks integrity validation:
+    - the split+zip algorithm is now defined
+    - but the PRD still does not require validating that the reconstructed record count and ID set exactly match the scorer/input list
+    - malformed output could therefore still be silently truncated or partially accepted
+  - `candidate_reason` lifecycle is still only half-closed:
+    - reverse migration explicitly sets `candidate_reason = reviewer_rejected`
+    - but forward promotion from `candidate` to `focus/watching` does not explicitly clear `candidate_reason`
+    - this conflicts with the field note that the reason is only meaningful when `category = candidate`
+
+## Latest PRD-Only Review (2026-03-24, v2.20)
+- Re-reviewed `Detailed_PRD.md` v2.20 strictly as a PRD/design artifact.
+- v2.20 closes the two specific consistency gaps called out in v2.19:
+  - parser integrity checks now validate both record count and ID-set equality
+  - forward promotion now explicitly clears `candidate_reason`
+- No new P0/P1-grade execution break was found in this pass.
+- Remaining design findings:
+  - Matching scope/normalization is still under-specified for audit-critical keyword/whitelist rules:
+    - the PRD now enumerates the institution whitelist and taxonomy keyword sets
+    - but still does not formally define whether matching is case-insensitive, which text fields are searched, or what normalization/tokenization is applied
+    - separate implementations could still diverge on edge cases
+  - The initial write semantics for `candidate_reason` remain implicit rather than explicit:
+    - reverse migration explicitly sets `candidate_reason = reviewer_rejected`
+    - promotion explicitly clears it
+    - but the PRD still does not directly state the insert-time write rule for setting `low_score` vs `capacity_overflow` when candidate rows are first created
+
+## Latest PRD-Only Review (2026-03-24, v2.21)
+- Re-reviewed `Detailed_PRD.md` v2.21 strictly as a PRD/design artifact.
+- v2.21 closes the two specific P2 audit-precision gaps called out in v2.20:
+  - matching protocol now formalizes case-insensitive, word-boundary matching plus field scope
+  - candidate insert-time reasons (`low_score` / `capacity_overflow`) are now explicit atomic writes
+- No regression to earlier parser/schema/API completeness was found in this pass.
+- Remaining design findings:
+  - The "top conference" signal is now tied to the wrong data scope:
+    - the global matching protocol restricts keyword-based scoring signals to `title_original` and `abstract`
+    - but the `ICLR/NeurIPS/CVPR/...` signal semantically represents venue acceptance/publication metadata, which is usually not encoded in title/abstract text
+    - as specified, this signal is likely to underfire and not faithfully represent "顶会收录"
+  - The "top institution" signal still lacks a durable schema anchor:
+    - the matching protocol says it must run against author affiliations
+    - but the database schema does not define a dedicated affiliations field, nor does it formalize that `authors` JSON must include affiliation strings
+    - this weakens independent auditability of the institution score from stored data alone
+
+## Latest PRD-Only Review (2026-03-24, v2.22)
+- Re-reviewed `Detailed_PRD.md` v2.22 strictly as a PRD/design artifact.
+- v2.22 closes the two specific data-source gaps called out in v2.21:
+  - `paper` now has a durable `venue` anchor for the top-conference signal
+  - `authors` JSON now explicitly includes `affiliation`, aligning the institution signal with stored data
+- No new P0-grade or broad structural regression was found in this pass.
+- Remaining design findings:
+  - The scoring contract now contains an internal scope conflict for the "代码可用" signal:
+    - section 3.1 says all remaining keyword-based scoring signals (other than institution/venue-special-cased ones) are matched against both `title_original` and `abstract`
+    - but section 3.2 still defines "代码可用" specifically as the abstract containing `github.com` or `Official Code`
+    - the PRD therefore gives two different source scopes for the same signal
+  - `candidate_reason` nullability is explicit in schema but not fully propagated into the API contract:
+    - the schema says `candidate_reason` must be `NULL` whenever `category != 'candidate'`
+    - the list payload now exposes `candidate_reason`
+    - but the API contract does not explicitly state that non-candidate rows must return `null` for this field
+
+## Latest PRD-Only Review (2026-03-24, v2.23)
+- Re-reviewed `Detailed_PRD.md` v2.23 strictly as a PRD/design artifact.
+- v2.23 closes the two specific consistency gaps called out in v2.22:
+  - the "代码可用" signal now aligns with the global matching scope
+  - the API now explicitly states that non-candidate rows return `candidate_reason = null`
+- No new P0/P1-grade break was found in this pass.
+- Remaining design findings:
+  - The regex matching protocol is still slightly under-specified for literal safety:
+    - section 3.1 standardizes matching as `\bkeyword\b`
+    - but does not explicitly state that keywords containing regex metacharacters must be escaped before interpolation
+    - this matters for tokens such as `github.com`, where a bare `.` would otherwise be interpreted as a wildcard
+  - The parser still tolerates out-of-band prose around canonical blocks:
+    - Editor/Writer splitting rules say index 0 is expected to be empty and is skipped
+    - but the PRD does not require failing when leading commentary or other non-empty out-of-band text appears outside the canonical templates
+
+## Latest PRD-Only Review (2026-03-24, v2.24)
+- Re-reviewed `Detailed_PRD.md` v2.24 strictly as a PRD/design artifact.
+- v2.24 closes the two strictness gaps called out in v2.23:
+  - keyword matching now explicitly requires literal escaping before regex assembly
+  - Editor/Writer now enforce a zero-prefix failure rule before block reconstruction
+- Remaining design findings:
+  - The physical/API contract now contains literal field-name typos that break machine-readability:
+    - `unsub_expires_at"` in `subscriber`
+    - `issue_date"` in `system_task_log`
+    - `limit"` in the list API params
+    - `token"` in the verify API params
+  - These are not cosmetic:
+    - the document positions itself as executable physical/API spec
+    - but these quoted field names would produce incorrect DDL or client contracts if implemented literally
+
+## Latest PRD-Only Review (2026-03-24, v2.25)
+- Re-reviewed `Detailed_PRD.md` v2.25 strictly as a PRD/design artifact.
+- v2.25 does fix the literal field/param typo regressions introduced in v2.24.
+- No new P0/P1-grade break was found in this pass.
+- Remaining design findings:
+  - The `candidate_reason` NULL contract is still not fully propagated to the list API:
+    - the schema says `candidate_reason` must be `NULL` whenever `category != 'candidate'`
+    - the list payload exposes `candidate_reason`
+    - but the API contract only explicitly states the non-candidate-null rule for the detail route
+  - The parser purity contract still only covers leading garbage, not all out-of-band text:
+    - Editor and Writer now fail on non-empty `blocks[0]`
+    - but the PRD still does not require failing on extra trailing or interstitial prose inside a reconstructed block if the expected fields still parse successfully
+
+## Latest Session Decision (2026-03-24, ship)
+- User explicitly judged the remaining issues as minor and requested immediate commit/push.
+- Preserve the current review stance:
+  - only two P2-level residual findings remain for `Detailed_PRD.md` v2.25
+  - no P0/P1 blocker remains in the latest PRD-only review
+- Operational instruction for this turn:
+  - commit and push the current document set as-is
