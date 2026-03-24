@@ -16,22 +16,24 @@
 
     <div v-else-if="paper" class="paper-article">
       <div class="category-badge">
-        <el-tag :type="paper.category === 'focus' ? 'danger' : 'info'" effect="dark">
-          {{ paper.category === 'focus' ? 'Focus' : 'Watching' }}
+        <el-tag :type="getCategoryType(paper.category)" effect="dark">
+          {{ getCategoryLabel(paper.category) }}
         </el-tag>
         <el-tag type="warning" effect="plain" class="score-tag">Score: {{ paper.score }}</el-tag>
+        <el-tag v-if="paper.candidate_reason" type="warning" effect="plain">{{ formatCandidateReason(paper.candidate_reason) }}</el-tag>
       </div>
       
       <h1 class="article-title">
-        {{ lang === 'cn' ? paper.title : (paper.title_en || paper.title) }}
+        {{ lang === 'cn' ? paper.title_zh : paper.title_original }}
       </h1>
       
       <div class="article-meta">
         <el-tag size="small" type="info">{{ paper.direction }}</el-tag>
-        <span class="authors">{{ lang === 'cn' ? '作者' : 'Authors' }}: {{ paper.authors.join(', ') }}</span>
+        <span class="authors">{{ lang === 'cn' ? '作者' : 'Authors' }}: {{ formatAuthors(paper.authors) }}</span>
+        <span v-if="paper.venue">{{ lang === 'cn' ? '来源' : 'Venue' }}: {{ paper.venue }}</span>
       </div>
 
-      <div class="ai-summary-section">
+      <div v-if="paper.category !== 'candidate'" class="ai-summary-section">
         <div class="section-block">
           <h3 class="s-title">💡 {{ lang === 'cn' ? '一句话总结' : 'One-line Summary' }}</h3>
           <p class="summary-text">{{ lang === 'cn' ? paper.one_line_summary : paper.one_line_summary_en }}</p>
@@ -51,6 +53,15 @@
           <p class="scenario-text">{{ lang === 'cn' ? paper.application_scenarios : paper.application_scenarios_en }}</p>
         </div>
       </div>
+
+      <el-alert
+        v-else
+        :title="lang === 'cn' ? '该论文进入了候选池，但未进入最终解读结果。' : 'This paper remained in the candidate pool and was not promoted into the final brief.'"
+        type="info"
+        :closable="false"
+        show-icon
+        class="candidate-alert"
+      />
 
       <div class="original-section">
         <el-collapse>
@@ -94,6 +105,33 @@ const fetchDetail = async (id) => {
   }
 }
 
+const formatAuthors = (authors = []) =>
+  authors
+    .map(author => (typeof author === 'string' ? author : author.name))
+    .filter(Boolean)
+    .join(', ')
+
+const getCategoryType = (category) => {
+  if (category === 'focus') return 'danger'
+  if (category === 'watching') return 'info'
+  return 'warning'
+}
+
+const getCategoryLabel = (category) => {
+  if (category === 'focus') return 'Focus'
+  if (category === 'watching') return 'Watching'
+  return 'Candidate'
+}
+
+const formatCandidateReason = (reason) => {
+  const map = {
+    low_score: lang.value === 'cn' ? '低分归档' : 'Low Score',
+    capacity_overflow: lang.value === 'cn' ? '容量溢出' : 'Capacity Overflow',
+    reviewer_rejected: lang.value === 'cn' ? '审核剔除' : 'Reviewer Rejected'
+  }
+  return map[reason] || reason
+}
+
 onMounted(() => {
   fetchDetail(route.params.id)
 })
@@ -112,6 +150,10 @@ onMounted(() => {
 
 .score-tag {
   font-weight: bold;
+}
+
+.candidate-alert {
+  margin-bottom: 35px;
 }
 
 .article-title {

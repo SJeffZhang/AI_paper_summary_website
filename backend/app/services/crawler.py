@@ -1,206 +1,217 @@
-import requests
+import re
+import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
-from typing import List, Dict, Any
+from typing import Any, Dict, List, Optional
+
+import requests
+
 from app.core.config import settings
+
 
 class Crawler:
     """
-    Crawler Module to fetch daily papers from Hugging Face API and arXiv.
+    Fetch daily papers from Hugging Face Daily Papers and arXiv, then normalize them
+    into the PRD v2.25 metadata structure.
     """
+
     ARXIV_CATEGORIES = ["cs.AI", "cs.CL", "cs.LG", "cs.CV", "cs.MA", "cs.IR"]
     ARXIV_API_URL = "http://export.arxiv.org/api/query"
+    ARXIV_ATOM_NS = {"atom": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/atom"}
+    GITHUB_REPO_PATTERN = re.compile(r"github\.com/([a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+)", re.IGNORECASE)
 
     def __init__(self, hf_api_url: str = settings.HUGGINGFACE_API_URL):
         self.hf_api_url = hf_api_url
 
-    def fetch_papers(self, fetch_date: str = None) -> List[Dict[str, Any]]:
-        """
-        Fetch papers from both HF and arXiv for a specific date.
-        """
+    def fetch_papers(self, fetch_date: Optional[str] = None) -> List[Dict[str, Any]]:
         if fetch_date is None:
-            yesterday = datetime.now(timezone(timedelta(hours=8))) - timedelta(days=1)
-            fetch_date = yesterday.strftime("%Y-%m-%d")
+            target_date = datetime.now(timezone(timedelta(hours=8))) - timedelta(days=3)
+            fetch_date = target_date.strftime("%Y-%m-%d")
 
-        print(f"Fetching papers for {fetch_date}...")
         hf_papers = self._fetch_hf_papers(fetch_date)
         arxiv_papers = self._fetch_arxiv_papers(fetch_date)
-        
-        # Merge by arxiv_id (HF papers take priority for metadata like upvotes)
-        merged = {p["arxiv_id"]: p for p in arxiv_papers}
-        for hp in hf_papers:
-            if hp["arxiv_id"] in merged:
-                merged[hp["arxiv_id"]].update(hp)
-                merged[hp["arxiv_id"]]["is_hf_daily"] = True
+
+        merged = {paper["arxiv_id"]: paper for paper in arxiv_papers}
+        for paper in hf_papers:
+            existing = merged.get(paper["arxiv_id"])
+            if existing:
+                existing.update(paper)
+                existing["is_hf_daily"] = True
             else:
-                hp["is_hf_daily"] = True
-                merged[hp["arxiv_id"]] = hp
-                
-        # Optional: Enrich top papers with citations and trending heuristics
-        results = list(merged.values())
-        return self.enrich_metadata(results)
+                paper["is_hf_daily"] = True
+                merged[paper["arxiv_id"]] = paper
+
+        return self.enrich_metadata(list(merged.values()))
 
     def enrich_metadata(self, papers: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        Enrich papers with real citation data and REAL GitHub Trending status.
-        """
-        # 1. Fetch real-time GitHub Trending list (Daily)
-        trending_repos = self._fetch_github_trending()
-        print(f"Fetched {len(trending_repos)} trending repos from GitHub.")
+        trending_repos = {repo.lower() for repo in self._fetch_github_trending()}
 
-        # 2. Enrich top papers (Directional mix or Global top)
-        # To reduce bias, we ensure top papers from HF and those with code links are checked
-        sorted_papers = sorted(papers, key=lambda x: x.get("upvotes", 0), reverse=True)
-        top_candidates = sorted_papers[:150]
-        
-        print(f"Enriching metadata for top {len(top_candidates)} papers...")
-        for p in top_candidates:
-            # 2.1 Academic Influence (Semantic Scholar)
-            try:
-                ss_url = f"https://api.semanticscholar.org/graph/v1/paper/ARXIV:{p['arxiv_id']}"
-                resp = requests.get(ss_url, params={"fields": "citationCount"}, timeout=5)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    p["citations"] = data.get("citationCount", 0)
-                else:
-                    p["citations"] = 0
-            except:
-                p["citations"] = 0
+        for paper in papers:
+            paper["citations"] = self._fetch_citation_count(paper["arxiv_id"])
+            paper["is_trending"] = any(
+                repo.lower() in trending_repos for repo in self._extract_github_repos(paper)
+            )
 
-            # 2.2 REAL OS Trending Signal
-            # Extract github repo from abstract and check if it's in the trending list
-            p["is_trending"] = False
-            abstract = p.get("abstract", "")
-            import re
-            github_links = re.findall(r"github\.com/([a-zA-Z0-9\-\._]+/[a-zA-Z0-9\-\._]+)", abstract)
-            for link in github_links:
-                # Clean link (remove trailing chars like . or ) )
-                clean_link = link.split(' ')[0].split(')')[0].split('.')[0].strip('/')
-                if clean_link.lower() in [r.lower() for r in trending_repos]:
-                    p["is_trending"] = True
-                    break
-                
-        # Initialize others
-        for p in papers:
-            if "citations" not in p:
-                p["citations"] = 0
-            if "is_trending" not in p:
-                p["is_trending"] = False
-        
         return papers
 
-    def _fetch_github_trending(self) -> List[str]:
-        """
-        Scrape GitHub Trending page (Daily) to get trending repository names.
-        """
-        trending_repos = []
+    def _fetch_citation_count(self, arxiv_id: str) -> int:
         try:
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            }
-            # Fetch daily trending
-            resp = requests.get("https://github.com/trending", headers=headers, timeout=15)
-            if resp.status_code == 200:
-                # Simple regex parsing to avoid heavy bs4 dependency if possible, 
-                # but standard practice would use an HTML parser.
-                # GitHub Trending structure: <h2 class="h3 lh-condensed"><a href="/owner/repo">
-                import re
-                matches = re.findall(r'href="/([a-zA-Z0-9\-\._]+/[a-zA-Z0-9\-\._]+)"\s+data-view-component="true"\s+class="Link"', resp.text)
-                # Filter out non-repo links like /trending/python
-                for m in matches:
-                    if "/" in m and not m.startswith("trending/"):
-                        trending_repos.append(m)
-        except Exception as e:
-            print(f"Error fetching GitHub Trending: {e}")
-        return trending_repos
+            response = requests.get(
+                f"https://api.semanticscholar.org/graph/v1/paper/ARXIV:{arxiv_id}",
+                params={"fields": "citationCount"},
+                timeout=5,
+            )
+            response.raise_for_status()
+            return int(response.json().get("citationCount", 0) or 0)
+        except Exception:
+            return 0
+
+    def _fetch_github_trending(self) -> List[str]:
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            )
+        }
+
+        try:
+            response = requests.get("https://github.com/trending", headers=headers, timeout=15)
+            response.raise_for_status()
+        except Exception:
+            return []
+
+        repos = re.findall(
+            r'href="/([a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+)"\s+data-view-component="true"\s+class="Link"',
+            response.text,
+        )
+        return [repo for repo in repos if "/" in repo and not repo.startswith("trending/")]
 
     def _fetch_hf_papers(self, fetch_date: str) -> List[Dict[str, Any]]:
-        params = {"date": fetch_date}
         try:
-            response = requests.get(self.hf_api_url, params=params, timeout=30)
+            response = requests.get(self.hf_api_url, params={"date": fetch_date}, timeout=30)
             response.raise_for_status()
-            data = response.json()
-            return self._normalize_hf_data(data, fallback_date=fetch_date)
-        except Exception as e:
-            print(f"Error fetching from HF: {e}")
+            return self._normalize_hf_data(response.json(), fallback_date=fetch_date)
+        except Exception:
             return []
 
     def _fetch_arxiv_papers(self, fetch_date: str) -> List[Dict[str, Any]]:
-        """
-        Fetch papers from arXiv API for the 6 categories.
-        """
-        all_arxiv = []
-        for cat in self.ARXIV_CATEGORIES:
+        papers: List[Dict[str, Any]] = []
+        for category in self.ARXIV_CATEGORIES:
             params = {
-                "search_query": f"cat:{cat}",
+                "search_query": f"cat:{category}",
                 "start": 0,
                 "max_results": 300,
                 "sortBy": "submittedDate",
-                "sortOrder": "descending"
+                "sortOrder": "descending",
             }
             try:
                 response = requests.get(self.ARXIV_API_URL, params=params, timeout=30)
                 response.raise_for_status()
-                papers = self._parse_arxiv_xml(response.text, fetch_date)
-                all_arxiv.extend(papers)
-            except Exception as e:
-                print(f"Error fetching from arXiv {cat}: {e}")
-        return all_arxiv
+                papers.extend(self._parse_arxiv_xml(response.text, fetch_date))
+            except Exception:
+                continue
+        return papers
 
     def _parse_arxiv_xml(self, xml_text: str, target_date: str) -> List[Dict[str, Any]]:
-        import xml.etree.ElementTree as ET
-        namespace = {'atom': 'http://www.w3.org/2005/Atom'}
         root = ET.fromstring(xml_text)
-        papers = []
-        for entry in root.findall('atom:entry', namespace):
-            published = entry.find('atom:published', namespace).text
+        papers: List[Dict[str, Any]] = []
+
+        for entry in root.findall("atom:entry", self.ARXIV_ATOM_NS):
+            published = entry.findtext("atom:published", default="", namespaces=self.ARXIV_ATOM_NS)
             pub_date = published.split("T")[0]
-            
             if pub_date != target_date:
                 continue
-                
-            arxiv_id = entry.find('atom:id', namespace).text.split('/')[-1]
-            title = entry.find('atom:title', namespace).text.strip().replace('\n', ' ')
-            summary = entry.find('atom:summary', namespace).text.strip().replace('\n', ' ')
-            authors = [a.find('atom:name', namespace).text for a in entry.findall('atom:author', namespace)]
-            
-            papers.append({
-                "arxiv_id": arxiv_id,
-                "title": title,
-                "title_en": title,
-                "authors": authors,
-                "abstract": summary,
-                "pdf_url": f"https://arxiv.org/pdf/{arxiv_id}.pdf",
-                "upvotes": 0,
-                "arxiv_publish_date": pub_date,
-                "is_hf_daily": False
-            })
+
+            arxiv_id = entry.findtext("atom:id", default="", namespaces=self.ARXIV_ATOM_NS).split("/")[-1]
+            title = self._normalize_text(entry.findtext("atom:title", default="", namespaces=self.ARXIV_ATOM_NS))
+            abstract = self._normalize_text(entry.findtext("atom:summary", default="", namespaces=self.ARXIV_ATOM_NS))
+            pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
+            venue = self._normalize_text(
+                entry.findtext("arxiv:journal_ref", default="", namespaces=self.ARXIV_ATOM_NS)
+            ) or None
+
+            authors = []
+            for author in entry.findall("atom:author", self.ARXIV_ATOM_NS):
+                authors.append(
+                    {
+                        "name": self._normalize_text(
+                            author.findtext("atom:name", default="", namespaces=self.ARXIV_ATOM_NS)
+                        ),
+                        "affiliation": self._normalize_text(
+                            author.findtext("arxiv:affiliation", default="", namespaces=self.ARXIV_ATOM_NS)
+                        ),
+                    }
+                )
+
+            papers.append(
+                {
+                    "arxiv_id": arxiv_id,
+                    "title_zh": None,
+                    "title_original": title,
+                    "authors": authors,
+                    "venue": venue,
+                    "abstract": abstract,
+                    "pdf_url": pdf_url,
+                    "upvotes": 0,
+                    "arxiv_publish_date": pub_date,
+                    "is_hf_daily": False,
+                }
+            )
+
         return papers
 
     def _normalize_hf_data(self, raw_data: List[Dict[str, Any]], fallback_date: str) -> List[Dict[str, Any]]:
-        """
-        Normalize HF API data into internal schema fields.
-        """
-        normalized = []
+        normalized: List[Dict[str, Any]] = []
+
         for item in raw_data:
             paper_info = item.get("paper", {})
             arxiv_id = paper_info.get("id")
             if not arxiv_id:
                 continue
 
-            authors = [a.get("name") for a in paper_info.get("authors", []) if a.get("name")]
-            published_at = item.get("publishedAt", "")
+            title_original = self._normalize_text(paper_info.get("title", ""))
+            published_at = item.get("publishedAt", "") or paper_info.get("publishedAt", "")
             arxiv_publish_date = published_at.split("T")[0] if "T" in published_at else fallback_date
-            title = paper_info.get("title", "")
+            authors = [
+                {
+                    "name": self._normalize_text(author.get("name", "")),
+                    "affiliation": self._normalize_text(author.get("affiliation", "")),
+                }
+                for author in paper_info.get("authors", [])
+                if author.get("name")
+            ]
 
-            normalized.append({
-                "arxiv_id": arxiv_id,
-                "title": title,
-                "title_en": title,
-                "authors": authors,
-                "abstract": paper_info.get("summary", ""),
-                "pdf_url": f"https://arxiv.org/pdf/{arxiv_id}.pdf",
-                "upvotes": paper_info.get("upvotes", 0),
-                "arxiv_publish_date": arxiv_publish_date,
-                "is_hf_daily": True
-            })
+            normalized.append(
+                {
+                    "arxiv_id": arxiv_id,
+                    "title_zh": None,
+                    "title_original": title_original,
+                    "authors": authors,
+                    "venue": self._normalize_text(
+                        paper_info.get("venue") or paper_info.get("conference") or item.get("venue", "")
+                    )
+                    or None,
+                    "abstract": self._normalize_text(paper_info.get("summary", "")),
+                    "pdf_url": paper_info.get("pdfUrl") or f"https://arxiv.org/pdf/{arxiv_id}.pdf",
+                    "upvotes": int(paper_info.get("upvotes", 0) or 0),
+                    "arxiv_publish_date": arxiv_publish_date,
+                    "is_hf_daily": True,
+                }
+            )
+
         return normalized
+
+    def _extract_github_repos(self, paper: Dict[str, Any]) -> List[str]:
+        text = " ".join(
+            filter(
+                None,
+                [
+                    paper.get("title_original", ""),
+                    paper.get("abstract", ""),
+                ],
+            )
+        )
+        return [repo.strip("/").split(")")[0] for repo in self.GITHUB_REPO_PATTERN.findall(text)]
+
+    @staticmethod
+    def _normalize_text(value: Any) -> str:
+        return " ".join(str(value or "").replace("\n", " ").split())

@@ -12,16 +12,17 @@
           <b :class="getScoreClass(scope.row.score)">{{ scope.row.score }}</b>
         </template>
       </el-table-column>
-      <el-table-column prop="title" :label="lang === 'cn' ? '论文标题' : 'Title'">
+      <el-table-column prop="title_zh" :label="lang === 'cn' ? '论文标题' : 'Title'">
         <template #default="scope">
-          <div class="table-title">{{ scope.row.title }}</div>
+          <div class="table-title">{{ scope.row.title_zh }}</div>
+          <div class="table-original">{{ scope.row.title_original }}</div>
           <div class="table-direction">{{ scope.row.direction }}</div>
         </template>
       </el-table-column>
       <el-table-column :label="lang === 'cn' ? '加分项' : 'Signals'" width="300">
         <template #default="scope">
           <div class="reasons-tags">
-            <el-tag v-for="(val, key) in scope.row.score_reasons" :key="key" size="small" effect="plain" type="success">
+            <el-tag v-for="(val, key) in (scope.row.score_reasons || {})" :key="key" size="small" effect="plain" type="success">
               {{ formatReason(key) }}: +{{ val }}
             </el-tag>
           </div>
@@ -30,6 +31,11 @@
       <el-table-column :label="lang === 'cn' ? '分层' : 'Tier'" width="100">
         <template #default="scope">
           <el-tag :type="getTierType(scope.row.category)" size="small">{{ scope.row.category }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column prop="candidate_reason" :label="lang === 'cn' ? '候选原因' : 'Candidate Reason'" width="180">
+        <template #default="scope">
+          <span>{{ formatCandidateReason(scope.row.candidate_reason) }}</span>
         </template>
       </el-table-column>
     </el-table>
@@ -105,6 +111,16 @@ const formatReason = (key) => {
   return map[key] || key
 }
 
+const formatCandidateReason = (reason) => {
+  if (!reason) return '-'
+  const map = {
+    low_score: lang.value === 'cn' ? '低分归档' : 'Low Score',
+    capacity_overflow: lang.value === 'cn' ? '容量溢出' : 'Capacity Overflow',
+    reviewer_rejected: lang.value === 'cn' ? '审核剔除' : 'Reviewer Rejected'
+  }
+  return map[reason] || reason
+}
+
 const getScoreClass = (score) => {
   if (score >= 80) return 'score-high'
   if (score >= 50) return 'score-med'
@@ -146,6 +162,11 @@ onMounted(fetchCandidates)
 .table-direction {
   font-size: 12px;
   color: #909399;
+}
+.table-original {
+  font-size: 12px;
+  color: #606266;
+  margin-bottom: 4px;
 }
 .reasons-tags {
   display: flex;

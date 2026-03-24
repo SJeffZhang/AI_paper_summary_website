@@ -1,56 +1,64 @@
-from pydantic import BaseModel, EmailStr
-from typing import List, Optional
 from datetime import date
+from typing import Any, Dict, List, Optional
 
-# Base Response format
+from pydantic import BaseModel, EmailStr
+
+
 class ResponseModel(BaseModel):
     code: int = 200
     msg: str = "success"
+    data: Optional[Any] = None
 
-# Paper Schemas
-class PaperSummaryBase(BaseModel):
+
+class AuthorModel(BaseModel):
+    name: str
+    affiliation: str = ""
+
+
+class PaperListItem(BaseModel):
     id: int
     arxiv_id: str
-    title: str
-    title_en: Optional[str] = None # PRD v2.0
-    
-    # CN fields
-    one_line_summary: str
-    core_highlights: List[str]
-    
-    # EN fields (PRD v2.0)
-    one_line_summary_en: Optional[str] = None
-    core_highlights_en: Optional[List[str]] = None
-    
-    # Metadata (PRD v2.0)
-    category: Optional[str] = None # focus, watching
-    score: int = 0
-    score_reasons: Optional[dict] = None
-    direction: Optional[str] = None
-    
+    title_zh: str
+    title_original: str
+    score: int
+    category: str
+    candidate_reason: Optional[str] = None
+    direction: str
     issue_date: date
+    score_reasons: Optional[Dict[str, int]] = None
+    one_line_summary: Optional[str] = None
+    one_line_summary_en: Optional[str] = None
 
-class PaperListResponse(BaseModel):
+
+class PaperListPayload(BaseModel):
     total: int
-    items: List[PaperSummaryBase]
+    items: List[PaperListItem]
+
 
 class PaperListResponseModel(ResponseModel):
-    data: PaperListResponse
+    data: PaperListPayload
 
-class PaperDetail(PaperSummaryBase):
-    authors: List[str]
+
+class PaperDetail(PaperListItem):
+    authors: List[AuthorModel]
+    venue: Optional[str] = None
     abstract: str
     pdf_url: str
-    application_scenarios: str
-    application_scenarios_en: Optional[str] = None
     arxiv_publish_date: date
+    score_reasons: Optional[Dict[str, int]] = None
+    core_highlights: Optional[List[str]] = None
+    core_highlights_en: Optional[List[str]] = None
+    application_scenarios: Optional[str] = None
+    application_scenarios_en: Optional[str] = None
+
 
 class PaperDetailResponseModel(ResponseModel):
     data: PaperDetail
 
-# Subscribe Schemas
+
 class SubscribeRequest(BaseModel):
     email: EmailStr
+
 
 class UnsubscribeRequest(BaseModel):
     token: str

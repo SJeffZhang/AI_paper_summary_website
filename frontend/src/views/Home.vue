@@ -39,7 +39,7 @@
                 <div class="title-area">
                   <el-tag size="small" effect="plain" class="direction-tag">{{ paper.direction }}</el-tag>
                   <h3 class="paper-title" @click="goToDetail(paper.id)">
-                    {{ lang === 'cn' ? paper.title : (paper.title_en || paper.title) }}
+                    {{ lang === 'cn' ? paper.title_zh : paper.title_original }}
                   </h3>
                 </div>
                 <div class="score-badge">
@@ -52,15 +52,6 @@
             <div class="paper-content">
               <div class="summary-box">
                 <p class="one-line">{{ lang === 'cn' ? paper.one_line_summary : paper.one_line_summary_en }}</p>
-              </div>
-              
-              <div class="highlights">
-                <div class="h-title">✨ {{ lang === 'cn' ? '核心亮点' : 'Highlights' }}</div>
-                <ul>
-                  <li v-for="(h, idx) in (lang === 'cn' ? paper.core_highlights : paper.core_highlights_en)" :key="idx">
-                    {{ h }}
-                  </li>
-                </ul>
               </div>
             </div>
 
@@ -86,7 +77,7 @@
             <div v-for="paper in group.watching" :key="paper.id" class="watching-item" @click="goToDetail(paper.id)">
               <div class="wi-header">
                 <span class="wi-direction">[{{ paper.direction }}]</span>
-                <span class="wi-title">{{ lang === 'cn' ? paper.title : (paper.title_en || paper.title) }}</span>
+                <span class="wi-title">{{ lang === 'cn' ? paper.title_zh : paper.title_original }}</span>
                 <span class="wi-score">{{ paper.score }}</span>
               </div>
               <p class="wi-summary">{{ lang === 'cn' ? paper.one_line_summary : paper.one_line_summary_en }}</p>
@@ -310,19 +301,6 @@ const goToDetail = (id) => {
   font-weight: 500;
   color: #2c3e50;
   line-height: 1.6;
-}
-
-.highlights .h-title {
-  font-weight: bold;
-  color: #606266;
-  margin-bottom: 10px;
-}
-
-.highlights ul {
-  margin: 0;
-  padding-left: 20px;
-  color: #606266;
-  line-height: 1.7;
 }
 
 .card-footer {

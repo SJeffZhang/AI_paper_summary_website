@@ -16,7 +16,7 @@
           </div>
           <div class="main-right">
             <h3 class="paper-title" @click="$router.push(`/paper/${paper.id}`)">
-              {{ lang === 'cn' ? paper.title : (paper.title_en || paper.title) }}
+              {{ lang === 'cn' ? paper.title_zh : paper.title_original }}
             </h3>
             <p class="summary">{{ lang === 'cn' ? paper.one_line_summary : paper.one_line_summary_en }}</p>
           </div>
