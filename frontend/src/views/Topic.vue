@@ -1,9 +1,18 @@
 <template>
   <div class="topic-page">
     <div class="page-header">
-      <el-button :icon="Back" @click="$router.push('/')">{{ lang === 'cn' ? '返回首页' : 'Back to Home' }}</el-button>
-      <h2 class="title">{{ lang === 'cn' ? '技术方向' : 'Topic' }}: {{ $route.params.name }}</h2>
-      <p class="subtitle">{{ lang === 'cn' ? '聚合该方向下的所有历史精选论文' : 'All curated papers under this technical direction' }}</p>
+      <el-button :icon="Back" @click="$router.push('/topics')">{{ lang === 'cn' ? '返回分类' : 'Back to Categories' }}</el-button>
+      <h2 class="title">
+        {{ lang === 'cn' ? '技术方向' : 'Topic' }}:
+        {{ lang === 'cn' ? (topicMeta?.labelCn || $route.params.name) : (topicMeta?.labelEn || $route.params.name) }}
+      </h2>
+      <p class="subtitle">
+        {{
+          lang === 'cn'
+            ? (topicMeta?.descriptionCn || '聚合该方向下的所有历史精选论文')
+            : (topicMeta?.descriptionEn || 'All curated papers under this technical direction')
+        }}
+      </p>
     </div>
 
     <div v-loading="loading" class="topic-feed">
@@ -42,10 +51,11 @@
 </template>
 
 <script setup>
-import { ref, onMounted, inject, watch } from 'vue'
+import { computed, ref, onMounted, inject, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Back } from '@element-plus/icons-vue'
 import { getPapers } from '../api/papers'
+import { getTopicMeta } from '../constants/topics'
 
 const lang = inject('lang')
 const route = useRoute()
@@ -55,6 +65,7 @@ const papers = ref([])
 const currentPage = ref(Number(route.query.page) || 1)
 const pageSize = ref(20)
 const total = ref(0)
+const topicMeta = computed(() => getTopicMeta(route.params.name))
 
 const fetchTopicPapers = async () => {
   loading.value = true

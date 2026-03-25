@@ -6,12 +6,11 @@ WATCHING_THRESHOLD = 50
 FOCUS_CAPACITY = 5
 WATCHING_CAPACITY = 12
 
-FOCUS_MINIMUM = 3
-WATCHING_MINIMUM = 8
-
 SUMMARY_CATEGORIES = ("focus", "watching", "candidate")
 CANDIDATE_REASONS = ("low_score", "capacity_overflow", "reviewer_rejected")
 TASK_STATUSES = ("RUNNING", "SUCCESS", "FAILED")
+AI_TRACE_STAGES = ("editor", "writer", "reviewer")
+AI_TRACE_STATUSES = ("generated", "accepted", "rejected", "invalid")
 
 DIRECTIONS = (
     "Agent",

@@ -4,27 +4,38 @@
 ### 1.1 项目定位
 为 AI 开发者提供**高确定性、双语对齐、历史可追溯**的每日技术简报。
 
-### 1.2 唯一选择权与发布基准 (Strict Tiers & Authority)
+### 1.2 唯一选择权与发布基准 (Quantity-First Tiers & Authority)
 **唯一选择权**: 系统排序引擎 (Scorer) 拥有绝对的候选论文“入选权”。AI 环节 (Editor) 仅负责对已入选论文生成定调简报，无权剔除 or 增加。
-系统按以下**非重叠**逻辑进行筛选，任何环节不达标即判定为当日任务 `FAILED`：
+系统按以下**非重叠**逻辑进行筛选，优先保证当期有稳定内容产出：
 1.  **分档过滤 (Thresholding)**: 
     *   `Focus 候选集`: 评分 $\ge 80$ 分。
     *   `Watching 候选集`: $50 \le$ 评分 $< 80$ 分。
 2.  **强制截断与归档 (Capacity & Archiving)**: 
-    *   将 `Focus 候选集` 按分数倒序排列，严格截取前 5 篇传入 Focus 解读流。
-    *   将 `Watching 候选集` 按分数倒序排列，严格截取前 12 篇传入 Watching 解读流。
+    *   将 `Focus 候选集` 按分数倒序排列，优先截取前 5 篇传入 Focus 解读流。
+    *   若 `Focus 候选集` 不足 5 篇，则从剩余候选中按总分倒序补足，直到达到 5 篇或候选耗尽。
+    *   在剔除已进入 Focus 的论文后，将 `Watching 候选集` 按分数倒序排列，截取最多 12 篇传入 Watching 解读流。
     *   **Candidate 归档与原子溯源规则**: 满足以下条件的论文在 `paper_summary` 中标记为 `category = 'candidate'`：
         *   `low_score`: 评分 $< 50$ 的全量抓取论文。**原子写入**: `category = 'candidate'`, `candidate_reason = 'low_score'`。
         *   `capacity_overflow`: 评分 $\ge 50$ 但在 Top 5/12 容量限制之外的论文。**原子写入**: `category = 'candidate'`, `candidate_reason = 'capacity_overflow'`。
         *   `reviewer_rejected`: 进入了解读流但最终被 Reviewer 标记为 `REJECTED` 的论文。**原子写入**: `category = 'candidate'`, `candidate_reason = 'reviewer_rejected'`。
-3.  **质量基准线 (Quality Baseline)**: 
-    *   **发布底线**: Focus 必须 $\ge 3$ 篇，Watching 必须 $\ge 8$ 篇。
-    *   **前置审计**: 若截取前的初始 `Focus 候选集` < 3 篇，或 `Watching 候选集` < 8 篇 $\rightarrow$ 任务直接标记为 `FAILED` (供给不足)。
-    *   **后置审计与补位状态迁移 (Backfill & State Transition)**: 
-        *   若 Reviewer 剔除导致存活篇数跌破底线，系统必须从对应候选集（按分数倒序递推）提取下一篇补位。
+    *   **阈值语义说明**: `score >= 80` 与 `50 <= score < 80` 是优先分档规则，而非最终发布的绝对硬门槛。在数量优先模式下，系统允许将高分但未达阈值的剩余论文补位进入 Focus，以保证当期有稳定产出。
+3.  **数量优先发布策略 (Quantity-First Release Policy)**:
+    *   **日常发布目标**: 系统优先保证当期有内容产出，不再以 `Focus < 3` 或 `Watching < 8` 作为日常发布失败条件。
+    *   **Focus 选取规则**:
+        *   优先选择所有 `score >= 80` 的论文，按分数倒序截取前 5 篇。
+        *   若 `score >= 80` 的论文不足 5 篇，则从剩余候选中按总分倒序补足，直到达到 5 篇或候选耗尽。
+    *   **Watching 选取规则**:
+        *   在剔除已进入 Focus 的论文后，从 `50 <= score < 80` 的论文中按分数倒序截取最多 12 篇。
+        *   Watching 允许少于 8 篇，必要时可为 0 篇。
+    *   **后置审计与补位状态迁移 (Backfill & State Transition)**:
+        *   若 Reviewer 剔除导致 Focus 或 Watching 数量下降，系统应从对应候选集中按分数倒序递推补位，直到恢复目标数量或候选耗尽。
         *   **排除规则 (Blacklist)**: 在当期任务中，任何曾被标记为 `REJECTED` 的论文将永久进入“补位黑名单”，严禁在该期号内再次被提取补位。
         *   **正向迁移 (Promotion)**: 补位流程通过 **UPDATE (原子更新)** 将记录从 `candidate` 变迁至 `focus/watching`，填充 narrative 字段，且**必须将 `candidate_reason` 物理重置为 NULL**。
         *   **逆向迁移 (Demotion)**: 若 Reviewer 拒绝某篇论文，系统必须通过 **UPDATE (原子更新)** 将其 `category` 设为 `candidate`，`candidate_reason = 'reviewer_rejected'`，且必须将所有 narrative 解读字段**物理重置为 NULL**。
+    *   **日常失败条件**:
+        *   当日抓取结果为空；
+        *   AI 流水线解析/审核/持久化失败；
+        *   任务执行过程发生不可恢复异常。
 
 ---
 
@@ -43,6 +54,12 @@
 3.  **Task-Level**: `system_task_log` 表以 `issue_date` 唯一。
     *   **状态机**: `RUNNING` -> `SUCCESS` / `FAILED`。
     *   **防重入**: 若当日任务已处于 `SUCCESS` 状态，严禁自动重跑，必须由管理员显式清除状态。
+
+### 2.3 历史回填执行约束 (Historical Backfill Execution)
+*   **适用范围**: 用于补齐历史 `issue_date` 的数据库记录，由专门回填脚本批量触发。
+*   **语义说明**: 历史回填默认沿用与日常发布一致的选题、AI 流和持久化契约，不额外引入更严格的供给门槛。
+*   **执行目标**: 优先补齐历史期的可展示内容；若某个 `issue_date` 外部抓取结果为空，该天可独立失败而不阻塞整段回填。
+*   **可追溯性**: 历史补齐必须通过明确的批处理入口执行，并在 `system_task_log` 中留下对应 `issue_date` 的任务记录。
 
 ---
 
@@ -166,6 +183,18 @@
     *   名单: `re.search(r"- \*\*拒绝名单\*\*: \[(.*?)\]", output)`。
     *   **失败终态**: 若解析连续 2 次失败，或剔除后篇数跌破基准且补位耗尽，任务正式标记为 `FAILED` 并持久化错误日志。
 
+### 4.4 AI 过程留痕 (中间产物入库)
+*   `Editor -> Writer -> Reviewer` 的中间产物必须落库，不能只保留最终 narrative。
+*   留痕粒度要求：
+    1. 以 `paper_summary` 为锚点逐篇存储；
+    2. 至少记录 `stage`、`attempt_no`、`stage_status`、`content`；
+    3. `Editor` 与 `Writer` 存逐篇块内容，`Reviewer` 存本轮审核结论文本；
+    4. 若同一批次出现重试，必须保留每一轮 attempt，不能用最后一轮覆盖前一轮。
+*   产品呈现要求：
+    1. AI 过程留痕默认用于数据库审计、排障与质检，不要求在前端详情页直接展示；
+    2. `candidate` 若曾进入 AI 流且后续被 Reviewer 剔除，也应保留过程留痕；
+    3. narrative 字段在 `candidate` 状态下仍必须物理为 `NULL`，但 AI trace 不应被清空。
+
 ---
 
 ## 5. 数据库全量物理规格 (Database Dialect: MySQL 8.0+)
@@ -204,7 +233,19 @@
 | 14. `application_scenarios_en`| TEXT | NULL | 英文应用场景 |
 *   **UK约束**: `UNIQUE KEY uk_paper_issue (paper_id, issue_date)`。
 
-### 5.3 `subscriber` (订阅系统)
+### 5.3 `paper_ai_trace` (AI 中间产物留痕)
+| 字段 | 类型 | 约束 | 描述 |
+| :--- | :--- | :--- | :--- |
+| `id` | INT | PK, AUTO_INCREMENT | - |
+| `paper_summary_id` | INT | FK(paper_summary.id), NOT NULL | 关联期号快照 |
+| `stage` | ENUM('editor', 'writer', 'reviewer') | INDEX, NOT NULL | AI 角色阶段 |
+| `stage_status` | ENUM('generated', 'accepted', 'rejected', 'invalid') | NOT NULL | 当前阶段在该论文上的状态；`invalid` 用于记录格式不合法、包装噪声或解析失败的原始输出 |
+| `attempt_no` | INT | NOT NULL, DEFAULT 1 | 第几轮生成/审核 |
+| `content` | TEXT | NOT NULL | 对应阶段的原始文本产物 |
+| `created_at` | DATETIME | DEFAULT CURRENT_TIMESTAMP | 产物入库时间 |
+*   **UK约束**: `UNIQUE KEY uk_trace_summary_stage_attempt (paper_summary_id, stage, attempt_no)`。
+
+### 5.4 `subscriber` (订阅系统)
 | 字段 | 类型 | 约束 | 描述 |
 | :--- | :--- | :--- | :--- |
 | `id` | INT | PK, AUTO_INCREMENT | - |
@@ -215,7 +256,7 @@
 | `verify_expires_at` | DATETIME | NULL | 激活过期 (24h) |
 | `unsub_expires_at` | DATETIME | NULL | 退订过期 (24h) |
 
-### 5.4 `system_task_log` (任务追踪)
+### 5.5 `system_task_log` (任务追踪)
 | 字段 | 类型 | 约束 | 描述 |
 | :--- | :--- | :--- | :--- |
 | `id` | INT | PK, AUTO_INCREMENT | - |

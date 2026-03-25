@@ -185,6 +185,33 @@ When continuing work in this repository, read this file first.
 ## Memory Maintenance Rule
 - At the end of each future conversation turn in this project, update `CODEX_MEMORY.md` if the project state, review conclusions, or collaboration rules have materially changed.
 
+## Latest Review Follow-up (2026-03-26, whole-system code review after monthly backfill/update)
+- Re-read `.nexus-map/INDEX.md`, `Detailed_PRD.md`, and the current repository state before reviewing.
+- Re-ran current regression baselines:
+  - `cd backend && ./venv/bin/pytest ../tests/backend ../tests/smoke` -> `42 passed`
+  - `cd frontend && /opt/homebrew/bin/npm run test:run` -> `8 tests passed`
+  - `cd frontend && /opt/homebrew/bin/npm run build` -> build passed, but the main JS chunk is still ~1.03 MB and Vite still warns about large chunks.
+- New whole-system findings from the current tree:
+  - AI trace persistence is still not fully compliant with PRD 4.4:
+    - `pipeline.py` only writes `paper_ai_trace` rows after Editor/Writer/Reviewer outputs have already passed structural parsing
+    - malformed outputs that trigger retries are discarded instead of being retained as failed attempts
+    - this means the DB audit trail is still incomplete even though AI traces now exist
+  - The one-line summary column length is still drifting across layers:
+    - `Detailed_PRD.md` says `TEXT`
+    - `setup_local_db.py` expects `TEXT` and post-fixes schema to `TEXT`
+    - but `database/schema.sql`, `database/migrate_v225.sql`, and `backend/app/models/domain.py` still define `one_line_summary` / `_en` as `VARCHAR(255)` / `String(255)`
+    - direct schema or migration execution can therefore recreate the wrong physical contract unless the post-fix path runs
+  - Frontend product copy has not fully caught up with the quantity-first release policy:
+    - `Home.vue` subtitle still promises “3-5 深度解读，8-12 值得关注”
+    - this no longer matches the accepted quantity-first semantics where Watching may be 0 and daily output is no longer gated by the old lower bounds
+  - Frontend still emits a runtime prop warning in `Sources.vue`:
+    - candidate rows pass an empty string to `ElTag type`
+    - frontend tests now surface this as a Vue/Element Plus warning
+- Non-blocking warnings still observed:
+  - SQLAlchemy `declarative_base()` deprecation warning in backend tests
+  - Element Plus `el-link underline` deprecation warning in frontend tests
+  - invalid `ElTag type=""` warning in `Sources.vue`
+
 ## Latest Conversation Update (2026-03-24)
 - User restated the standing task:
   - Codex's primary job in this repository is PRD review.
@@ -870,3 +897,87 @@ When continuing work in this repository, read this file first.
   - repository file changes: added `dev_memory.md`, removed `issue_2026-02-14_ai_results.md`
 - Follow-up action for this turn:
   - create a second memory-sync commit and push both commits to `origin/main`
+
+## Latest Full-System Review (2026-03-26, month-backfill pass)
+- Re-read:
+  - `.nexus-map/INDEX.md`
+  - latest `Detailed_PRD.md`
+  - `CODEX_MEMORY.md`
+- Reviewed the current tree after the user stated:
+  - the last month of database history was backfilled
+  - pipeline/backfill logic was updated
+  - frontend navigation around topics was expanded
+- Actual verification performed:
+  - `cd backend && ./venv/bin/pytest ../tests/backend ../tests/smoke` -> passed (`40 passed`)
+  - `cd frontend && PATH=/opt/homebrew/bin:$PATH /opt/homebrew/bin/npm run test:run` -> passed (`5 files, 8 tests`)
+- Important conclusion:
+  - this pass is **not** a runtime-red regression pass
+  - tests are green, but the implementation now drifts away from the current PRD’s strict daily-release contract
+- Current findings from the actual tree:
+  - the normal pipeline path no longer enforces the PRD baseline:
+    - PRD still requires Focus thresholding at `>=80`, Watching at `[50,80)`, and a hard pre-audit failure when Focus `<3` or Watching `<8`
+    - current `Pipeline._select_batches()` backfills Focus with arbitrary highest-scoring remaining papers and allows Watching to collapse to any count, including zero
+    - current `Pipeline.run()` passes `minimum=len(focus_selected)` / `len(watching_selected)` instead of PRD-level fixed baselines
+  - historical backfill mode now has a separate semantic contract from the PRD:
+    - it bypasses the Editor -> Writer -> Reviewer chain via `summarize_batch_direct()` / `summarize_paper_direct()`
+    - it only snapshots a reduced focus-side subset instead of the full scored candidate pool, which weakens historical `/sources` completeness
+  - `run_pipeline_once.py` now also encodes the relaxed semantics:
+    - it falls back to the first non-empty date when no date reaches the original supply window
+    - so helper tooling will actively select issue dates that the current PRD says should fail supply audit
+- Interpretation rule for future turns:
+  - do not treat green tests alone as proof of PRD alignment
+  - this repository now has at least one case where tests were updated to codify behavior that conflicts with the current PRD
+
+## Latest User Decision (2026-03-26, relaxed daily supply baseline accepted)
+- User explicitly accepted the deviation that:
+  - the daily pipeline no longer strictly enforces the PRD Focus/Watching release baseline
+  - the system should prioritize output quantity over the previous strict `Focus >= 3` / `Watching >= 8` gate
+- Review handling rule from this turn onward:
+  - do not raise the relaxed daily supply-baseline behavior as a default review finding
+  - do not separately raise the derived `run_pipeline_once.py` fallback-probe behavior, because it follows the same accepted product decision
+- Important nuance:
+  - this is an accepted product/runtime deviation from the current PRD text, not proof that the PRD has been updated
+  - only resurface this topic if the user explicitly asks for PRD-truth alignment or production-policy re-evaluation
+
+## Latest Whole-System Review Follow-up (2026-03-26, AI trace + schema/text sync pass)
+- Re-read before review:
+  - `.nexus-map/INDEX.md`
+  - latest `Detailed_PRD.md`
+  - `CODEX_MEMORY.md`
+- User claimed the previous 4 findings were fixed:
+  - invalid AI attempts are now retained in `paper_ai_trace`
+  - `one_line_summary` / `_en` are unified to `TEXT` across ORM / SQL / migration / setup validation
+  - homepage subtitle now reflects quantity-first wording
+  - `Sources.vue` no longer passes an empty string to `ElTag type`
+- Actual verification performed:
+  - `cd backend && ./venv/bin/python -m compileall app scripts` -> passed
+  - `cd backend && ./venv/bin/pytest ../tests/backend ../tests/smoke` -> passed (`41 passed`, 1 warning)
+  - `cd frontend && /opt/homebrew/bin/npm run test:run` -> passed (`8 tests`)
+  - `cd frontend && /opt/homebrew/bin/npm run build` -> passed
+- Current review conclusion:
+  - no new substantive P1/P2 findings were identified in the current tree for this pass
+  - the previously reported 4 issues are materially fixed:
+    - `paper_ai_trace.stage_status` now includes `invalid`
+    - `StructuredOutputError` carries `raw_output`, and invalid Editor/Writer/Reviewer attempts are persisted by the pipeline
+    - `writer` traces are persisted before the reviewer stage, so reviewer failure no longer drops writer output
+    - `one_line_summary` / `_en` are now consistently `TEXT` in ORM, raw schema, migration, and setup validation
+    - `Home.vue` subtitle now reflects the accepted quantity-first release semantics
+    - `Sources.vue` candidate rows now use a legal Element Plus tag type
+- Remaining non-blocking observations after this pass:
+  - backend tests still emit the existing SQLAlchemy `declarative_base()` deprecation warning
+  - frontend tests/build still emit the existing Element Plus `el-link underline` deprecation warning
+  - frontend production build still warns about the large main JS chunk
+  - `tests/live` and the real Kimi + MySQL live pipeline were not rerun in this pass
+
+## Latest Git Action Request (2026-03-26, AI trace + quantity-first follow-up push)
+- User requested committing and pushing the current working tree to GitHub.
+- Before staging, the pending change set was reviewed for sensitive-content risk:
+  - no `.env` or local credential files were in the worktree
+  - regex scan on the modified/untracked files only matched config field names, test keys, and model-related code references
+  - no actual API key or password value was identified in the pending diff
+- This push is expected to include:
+  - AI trace persistence and `invalid` stage-status support
+  - `one_line_summary` / `_en` unified to `TEXT` across ORM / raw schema / migration / setup validation
+  - quantity-first homepage subtitle wording
+  - `Sources.vue` candidate tag-type cleanup
+  - latest regression and frontend test updates

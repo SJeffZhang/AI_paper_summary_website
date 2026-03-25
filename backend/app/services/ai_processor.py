@@ -8,6 +8,12 @@ from openai import APIConnectionError, APIError, APITimeoutError, Authentication
 from app.core.config import settings
 
 
+class StructuredOutputError(ValueError):
+    def __init__(self, message: str, raw_output: str):
+        super().__init__(message)
+        self.raw_output = raw_output
+
+
 class AIProcessor:
     """
     Multi-agent workflow:
@@ -41,7 +47,7 @@ class AIProcessor:
         *,
         response_format: Optional[Dict[str, str]] = None,
         longform: bool = False,
-        temperature: float = 0.3,
+        temperature: Optional[float] = 1.0,
     ) -> str:
         if not self.api_key.strip():
             raise RuntimeError("KIMI_API_KEY is not configured.")
@@ -58,8 +64,9 @@ class AIProcessor:
         payload: Dict[str, Any] = {
             "model": settings.KIMI_MODEL,
             "messages": messages,
-            "temperature": temperature,
         }
+        if temperature is not None:
+            payload["temperature"] = temperature
         if response_format is not None:
             payload["response_format"] = response_format
 
@@ -116,18 +123,10 @@ class AIProcessor:
             )
 
         output = self._call_llm(self.editor_prompt, "\n".join(input_text), longform=True)
-        records = self._split_markdown_blocks(output, self.EDITOR_BLOCK_PATTERN, "Editor")
-        self._validate_exact_id_set(records, locked_papers, "Editor")
-
-        for arxiv_id, block in records:
-            angle = re.search(r"- \*\*写作角度\*\*: (.*?)\n", block)
-            problem = re.search(r"- \*\*核心痛点\*\*: (.*?)\n", block)
-            solution = re.search(r"- \*\*具体解法\*\*: (.*?)(?:\n|$)", block)
-            if not all([angle, problem, solution]):
-                raise ValueError(f"Editor block for {arxiv_id} is incomplete.")
-            if not all(match.group(1).strip() for match in (angle, problem, solution)):
-                raise ValueError(f"Editor block for {arxiv_id} contains empty required fields.")
-
+        try:
+            self.parse_editor_records(output, locked_papers)
+        except Exception as exc:
+            raise StructuredOutputError(str(exc), raw_output=output) from exc
         return output
 
     def localize_titles(self, papers: Sequence[Dict[str, Any]], batch_size: Optional[int] = None) -> Dict[str, str]:
@@ -183,7 +182,7 @@ class AIProcessor:
         category: str,
         history: Optional[List[Dict[str, str]]] = None,
     ) -> str:
-        selected_ids = [arxiv_id for arxiv_id, _ in self._split_markdown_blocks(editor_brief, r"## 论文: \[(.*?)\]", "Editor")]
+        selected_ids = [record["arxiv_id"] for record in self.parse_editor_records(editor_brief, papers_metadata)]
         metadata_map = {paper["arxiv_id"]: paper for paper in papers_metadata}
 
         context = [f"# Batch Type: {category}", "", "# Paper Metadata", ""]
@@ -206,39 +205,47 @@ class AIProcessor:
             history=history,
             longform=True,
         )
-        records = self._split_markdown_blocks(output, self.WRITER_BLOCK_PATTERN, "Writer")
-        self._validate_exact_id_set(records, papers_metadata, "Writer")
+        try:
+            self.parse_writer_records(output, papers_metadata, category)
+        except Exception as exc:
+            raise StructuredOutputError(str(exc), raw_output=output) from exc
         return output
 
     def run_reviewer(self, writer_output: str) -> Dict[str, Any]:
         output = self._call_llm(self.reviewer_prompt, writer_output, longform=True).strip()
-        normalized_output = self._strip_structured_output_wrappers(
-            output,
-            self.REVIEWER_ANCHOR_PATTERN,
-            allow_preface=True,
-        )
+        try:
+            normalized_output = self._strip_structured_output_wrappers(
+                output,
+                self.REVIEWER_ANCHOR_PATTERN,
+                allow_preface=True,
+            )
 
-        full_match = re.fullmatch(
-            r"- \*\*整体结论\*\*: (PASSED|REJECTED)\n- \*\*拒绝名单\*\*: \[(.*?)\]\s*",
-            normalized_output,
-        )
-        if not full_match:
-            raise ValueError("Reviewer output does not match the strict two-line contract.")
+            full_match = re.fullmatch(
+                r"- \*\*整体结论\*\*: (PASSED|REJECTED)\n- \*\*拒绝名单\*\*: \[(.*?)\]\s*",
+                normalized_output,
+            )
+            if not full_match:
+                raise ValueError("Reviewer output does not match the strict two-line contract.")
 
-        status = full_match.group(1)
-        rejected_ids = [item.strip() for item in full_match.group(2).split(",") if item.strip()]
-        writer_ids = {arxiv_id for arxiv_id, _ in self._split_markdown_blocks(writer_output, self.WRITER_BLOCK_PATTERN, "Writer")}
+            status = full_match.group(1)
+            rejected_ids = [item.strip() for item in full_match.group(2).split(",") if item.strip()]
+            writer_ids = {
+                arxiv_id
+                for arxiv_id, _ in self._split_markdown_blocks(writer_output, self.WRITER_BLOCK_PATTERN, "Writer")
+            }
 
-        if status == "PASSED" and rejected_ids:
-            raise ValueError("Reviewer returned PASSED with a non-empty rejection list.")
-        if status == "REJECTED":
-            if not rejected_ids:
-                raise ValueError("Reviewer returned REJECTED with an empty rejection list.")
-            invalid_ids = set(rejected_ids) - writer_ids
-            if invalid_ids:
-                raise ValueError(f"Reviewer returned invalid rejection IDs: {sorted(invalid_ids)}")
+            if status == "PASSED" and rejected_ids:
+                raise ValueError("Reviewer returned PASSED with a non-empty rejection list.")
+            if status == "REJECTED":
+                if not rejected_ids:
+                    raise ValueError("Reviewer returned REJECTED with an empty rejection list.")
+                invalid_ids = set(rejected_ids) - writer_ids
+                if invalid_ids:
+                    raise ValueError(f"Reviewer returned invalid rejection IDs: {sorted(invalid_ids)}")
 
-        return {"status": status, "rejected_ids": rejected_ids, "raw_output": normalized_output}
+            return {"status": status, "rejected_ids": rejected_ids, "raw_output": normalized_output}
+        except Exception as exc:
+            raise StructuredOutputError(str(exc), raw_output=output) from exc
 
     def parse_final_summaries(
         self,
@@ -246,14 +253,63 @@ class AIProcessor:
         rejected_ids: Sequence[str],
         category: str,
     ) -> List[Dict[str, Any]]:
-        records = self._split_markdown_blocks(writer_output, self.WRITER_BLOCK_PATTERN, "Writer")
         rejected_set = set(rejected_ids)
-        results: List[Dict[str, Any]] = []
+        return [
+            {
+                "arxiv_id": record["arxiv_id"],
+                "one_line_summary": record["one_line_summary"],
+                "one_line_summary_en": record["one_line_summary_en"],
+                "core_highlights": record["core_highlights"],
+                "core_highlights_en": record["core_highlights_en"],
+                "application_scenarios": record["application_scenarios"],
+                "application_scenarios_en": record["application_scenarios_en"],
+            }
+            for record in self.parse_writer_records(writer_output, None, category)
+            if record["arxiv_id"] not in rejected_set
+        ]
 
+    def parse_editor_records(
+        self,
+        editor_output: str,
+        papers: Sequence[Dict[str, Any]],
+    ) -> List[Dict[str, str]]:
+        records = self._split_markdown_blocks(editor_output, self.EDITOR_BLOCK_PATTERN, "Editor")
+        self._validate_exact_id_set(records, papers, "Editor")
+
+        parsed_records: List[Dict[str, str]] = []
         for arxiv_id, block in records:
-            if arxiv_id in rejected_set:
-                continue
+            angle = re.search(r"- \*\*写作角度\*\*: (.*?)\n", block)
+            problem = re.search(r"- \*\*核心痛点\*\*: (.*?)\n", block)
+            solution = re.search(r"- \*\*具体解法\*\*: (.*?)(?:\n|$)", block)
+            if not all([angle, problem, solution]):
+                raise ValueError(f"Editor block for {arxiv_id} is incomplete.")
+            if not all(match.group(1).strip() for match in (angle, problem, solution)):
+                raise ValueError(f"Editor block for {arxiv_id} contains empty required fields.")
 
+            parsed_records.append(
+                {
+                    "arxiv_id": arxiv_id,
+                    "writing_angle": angle.group(1).strip(),
+                    "core_problem": problem.group(1).strip(),
+                    "solution": solution.group(1).strip(),
+                    "content": f"## 论文: [{arxiv_id}]\n{block.strip()}",
+                }
+            )
+
+        return parsed_records
+
+    def parse_writer_records(
+        self,
+        writer_output: str,
+        papers_metadata: Optional[Sequence[Dict[str, Any]]],
+        category: str,
+    ) -> List[Dict[str, Any]]:
+        records = self._split_markdown_blocks(writer_output, self.WRITER_BLOCK_PATTERN, "Writer")
+        if papers_metadata is not None:
+            self._validate_exact_id_set(records, papers_metadata, "Writer")
+
+        parsed_records: List[Dict[str, Any]] = []
+        for arxiv_id, block in records:
             one_line_cn_match = re.search(r"- \*\*一句话总结\*\*: (.*?)\n", block)
             one_line_en_match = re.search(r"- \*\*One-line Summary\*\*: (.*?)\n", block)
             highlights_cn_match = re.search(r"- \*\*核心亮点\*\*:\n(.*?)\n- \*\*Core Highlights\*\*:", block, re.S)
@@ -291,7 +347,7 @@ class AIProcessor:
                     f"Writer block for {arxiv_id} has {len(highlights_cn)} highlights, expected {min_highlights}-{max_highlights}."
                 )
 
-            results.append(
+            parsed_records.append(
                 {
                     "arxiv_id": arxiv_id,
                     "one_line_summary": one_line_cn,
@@ -300,10 +356,11 @@ class AIProcessor:
                     "core_highlights_en": highlights_en,
                     "application_scenarios": scenarios_cn,
                     "application_scenarios_en": scenarios_en,
+                    "content": f"## [{arxiv_id}]\n{block.strip()}",
                 }
             )
 
-        return results
+        return parsed_records
 
     @staticmethod
     def _split_markdown_blocks(output: str, pattern: str, stage_name: str) -> List[Tuple[str, str]]:

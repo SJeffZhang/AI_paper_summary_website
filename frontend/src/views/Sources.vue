@@ -6,34 +6,52 @@
       <p class="subtitle">{{ lang === 'cn' ? '展示当日所有经过评分引擎扫描的论文及其得分维度' : 'All papers scanned by the scoring engine for this day' }}</p>
     </div>
 
-    <el-table :data="candidates" stripe style="width: 100%" v-loading="loading">
+    <el-table :data="candidates" stripe size="small" style="width: 100%" v-loading="loading">
       <el-table-column prop="score" :label="lang === 'cn' ? '总分' : 'Score'" width="80" sortable>
         <template #default="scope">
           <b :class="getScoreClass(scope.row.score)">{{ scope.row.score }}</b>
         </template>
       </el-table-column>
-      <el-table-column prop="title_zh" :label="lang === 'cn' ? '论文标题' : 'Title'">
+      <el-table-column
+        prop="title_zh"
+        :label="lang === 'cn' ? '论文标题' : 'Title'"
+        min-width="460"
+      >
         <template #default="scope">
           <div class="table-title">{{ scope.row.title_zh }}</div>
           <div class="table-original">{{ scope.row.title_original }}</div>
           <div class="table-direction">{{ scope.row.direction }}</div>
         </template>
       </el-table-column>
-      <el-table-column :label="lang === 'cn' ? '加分项' : 'Signals'" width="300">
+      <el-table-column
+        :label="lang === 'cn' ? '加分项' : 'Signals'"
+        width="260"
+        class-name="signals-column"
+      >
         <template #default="scope">
           <div class="reasons-tags">
-            <el-tag v-for="(val, key) in (scope.row.score_reasons || {})" :key="key" size="small" effect="plain" type="success">
+            <el-tag
+              v-for="[key, val] in getScoreReasonEntries(scope.row.score_reasons)"
+              :key="key"
+              size="small"
+              effect="plain"
+              type="success"
+            >
               {{ formatReason(key) }}: +{{ val }}
             </el-tag>
           </div>
         </template>
       </el-table-column>
-      <el-table-column :label="lang === 'cn' ? '分层' : 'Tier'" width="100">
+      <el-table-column :label="lang === 'cn' ? '分层' : 'Tier'" width="92">
         <template #default="scope">
           <el-tag :type="getTierType(scope.row.category)" size="small">{{ scope.row.category }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="candidate_reason" :label="lang === 'cn' ? '候选原因' : 'Candidate Reason'" width="180">
+      <el-table-column
+        prop="candidate_reason"
+        :label="lang === 'cn' ? '候选原因' : 'Candidate Reason'"
+        width="150"
+      >
         <template #default="scope">
           <span>{{ formatCandidateReason(scope.row.candidate_reason) }}</span>
         </template>
@@ -92,6 +110,8 @@ const handlePageChange = (val) => {
   router.push({ query: { ...route.query, page: val } })
 }
 
+const getScoreReasonEntries = (scoreReasons) => Object.entries(scoreReasons || {})
+
 watch(() => route.query.page, (newVal) => {
   currentPage.value = Number(newVal) || 1
   fetchCandidates()
@@ -130,7 +150,7 @@ const getScoreClass = (score) => {
 const getTierType = (cat) => {
   if (cat === 'focus') return 'danger'
   if (cat === 'watching') return 'info'
-  return ''
+  return 'warning'
 }
 
 onMounted(fetchCandidates)
@@ -151,27 +171,58 @@ onMounted(fetchCandidates)
   color: #909399;
   font-size: 14px;
 }
+
+.sources-page :deep(.el-table .cell) {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  line-height: 1.35;
+}
+
 .score-high { color: #f56c6c; }
 .score-med { color: #e6a23c; }
 .score-low { color: #909399; }
 .table-title {
   font-weight: 500;
   color: #303133;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
+  line-height: 1.35;
 }
 .table-direction {
+  margin-top: 2px;
   font-size: 12px;
   color: #909399;
+  line-height: 1.25;
 }
 .table-original {
   font-size: 12px;
   color: #606266;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
+  line-height: 1.25;
 }
 .reasons-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
+  gap: 4px;
+  align-items: flex-start;
+}
+
+.sources-page :deep(.signals-column .cell) {
+  display: block;
+  overflow: visible;
+  text-overflow: unset;
+  white-space: normal;
+  line-height: 1.5;
+  max-height: none;
+  -webkit-line-clamp: unset;
+  -webkit-box-orient: initial;
+}
+
+.sources-page :deep(.reasons-tags .el-tag) {
+  margin: 0;
+  padding: 0 6px;
+  height: 20px;
+  line-height: 18px;
+  font-size: 11px;
 }
 .pagination-area {
   display: flex;

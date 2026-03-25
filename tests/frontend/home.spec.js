@@ -54,4 +54,19 @@ describe('Home view', () => {
     expect(wrapper.text()).toContain('Focus Title Original')
     expect(wrapper.text()).toContain('Watching Title Original')
   })
+
+  it('shows a category entry button on the homepage', async () => {
+    const router = await createTestRouter('/', '/', Home)
+    const wrapper = mount(Home, {
+      global: {
+        provide: { lang: ref('cn') },
+        plugins: [...testPlugins, router]
+      }
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('进入论文分类')
+    expect(wrapper.text()).toContain('最多 5 篇 Focus 与最多 12 篇 Watching')
+  })
 })

@@ -39,7 +39,12 @@ export const paperListPayload = {
       candidate_reason: 'low_score',
       direction: 'Benchmarking',
       issue_date: '2026-03-23',
-      score_reasons: { academic_influence: 12 },
+      score_reasons: {
+        top_org: 20,
+        top_conf: 25,
+        academic_influence: 12,
+        has_code: 15
+      },
       one_line_summary: null,
       one_line_summary_en: null
     },
@@ -99,7 +104,11 @@ export const candidateDetail = {
   abstract: 'Latest candidate abstract',
   pdf_url: 'https://arxiv.org/pdf/2503.01004.pdf',
   arxiv_publish_date: '2026-03-19',
-  score_reasons: { community_popularity: 10 },
+  score_reasons: {
+    community_popularity: 10,
+    has_code: 15,
+    top_org: 20
+  },
   one_line_summary: null,
   one_line_summary_en: null,
   core_highlights: null,

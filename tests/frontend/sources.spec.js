@@ -36,7 +36,10 @@ describe('Sources view', () => {
       limit: 50
     })
     expect(wrapper.text()).toContain('中文候选标题')
+    expect(wrapper.text()).toContain('顶尖机构')
+    expect(wrapper.text()).toContain('顶会收录')
     expect(wrapper.text()).toContain('学术影响')
+    expect(wrapper.text()).toContain('代码可用')
     expect(wrapper.text()).toContain('低分归档')
   })
 })

@@ -19,6 +19,7 @@ MIGRATION_PATH = Path(__file__).resolve().parents[2] / "database" / "migrate_v22
 POST_SCHEMA_FIXES = [
     "ALTER TABLE `paper_summary` MODIFY COLUMN `one_line_summary` TEXT NULL",
     "ALTER TABLE `paper_summary` MODIFY COLUMN `one_line_summary_en` TEXT NULL",
+    "ALTER TABLE `paper_ai_trace` MODIFY COLUMN `stage_status` ENUM('generated','accepted','rejected','invalid') NOT NULL",
 ]
 EXPECTED_COLUMN_RULES = {
     "paper": {
@@ -58,6 +59,15 @@ EXPECTED_COLUMN_RULES = {
         "application_scenarios_en": {"type": "text", "null": "YES"},
         "created_at": {"type": "datetime", "null": "NO"},
     },
+    "paper_ai_trace": {
+        "id": {"type": "int", "null": "NO", "extra_contains": "auto_increment"},
+        "paper_summary_id": {"type": "int", "null": "NO"},
+        "stage": {"type": "enum('editor','writer','reviewer')", "null": "NO"},
+        "stage_status": {"type": "enum('generated','accepted','rejected','invalid')", "null": "NO"},
+        "attempt_no": {"type": "int", "null": "NO", "default": "1"},
+        "content": {"type": "text", "null": "NO"},
+        "created_at": {"type": "datetime", "null": "NO"},
+    },
     "subscriber": {
         "id": {"type": "int", "null": "NO", "extra_contains": "auto_increment"},
         "email": {"type": "varchar(255)", "null": "NO"},
@@ -83,11 +93,13 @@ EXPECTED_COLUMN_RULES = {
 EXPECTED_INDEXES = {
     "paper": {"PRIMARY", "uk_arxiv_id", "idx_publish_date"},
     "paper_summary": {"PRIMARY", "uk_paper_issue", "idx_issue_date", "idx_category", "idx_direction"},
+    "paper_ai_trace": {"PRIMARY", "uk_trace_summary_stage_attempt", "idx_trace_summary_id", "idx_trace_stage"},
     "subscriber": {"PRIMARY", "uk_email", "uk_verify_token", "uk_unsub_token", "idx_status"},
     "system_task_log": {"PRIMARY", "uk_issue_date"},
 }
 EXPECTED_FOREIGN_KEYS = {
     "paper_summary": {"fk_paper_summary_paper_id"},
+    "paper_ai_trace": {"fk_paper_ai_trace_summary_id"},
 }
 CJK_PATTERN = re.compile(r"[\u3400-\u4DBF\u4E00-\u9FFF]")
 

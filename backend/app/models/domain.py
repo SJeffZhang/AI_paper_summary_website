@@ -2,7 +2,7 @@ from sqlalchemy import Column, Date, DateTime, Enum, ForeignKey, Integer, JSON, 
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
-from app.core.specs import CANDIDATE_REASONS, DIRECTIONS, SUMMARY_CATEGORIES
+from app.core.specs import AI_TRACE_STAGES, AI_TRACE_STATUSES, CANDIDATE_REASONS, DIRECTIONS, SUMMARY_CATEGORIES
 from app.models.base import Base
 
 
@@ -38,8 +38,8 @@ class PaperSummary(Base):
         nullable=True,
     )
     direction = Column(Enum(*DIRECTIONS, name="paper_direction"), index=True, nullable=False)
-    one_line_summary = Column(String(255), nullable=True)
-    one_line_summary_en = Column(String(255), nullable=True)
+    one_line_summary = Column(Text, nullable=True)
+    one_line_summary_en = Column(Text, nullable=True)
     core_highlights = Column(JSON, nullable=True)
     core_highlights_en = Column(JSON, nullable=True)
     application_scenarios = Column(Text, nullable=True)
@@ -47,9 +47,28 @@ class PaperSummary(Base):
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
 
     paper = relationship("Paper", back_populates="summaries")
+    ai_traces = relationship("PaperAITrace", back_populates="summary", cascade="all, delete-orphan")
 
     __table_args__ = (
         UniqueConstraint("paper_id", "issue_date", name="uk_paper_issue"),
+    )
+
+
+class PaperAITrace(Base):
+    __tablename__ = "paper_ai_trace"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    paper_summary_id = Column(Integer, ForeignKey("paper_summary.id", ondelete="CASCADE"), nullable=False)
+    stage = Column(Enum(*AI_TRACE_STAGES, name="paper_ai_trace_stage"), index=True, nullable=False)
+    stage_status = Column(Enum(*AI_TRACE_STATUSES, name="paper_ai_trace_status"), nullable=False)
+    attempt_no = Column(Integer, nullable=False, default=1)
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+
+    summary = relationship("PaperSummary", back_populates="ai_traces")
+
+    __table_args__ = (
+        UniqueConstraint("paper_summary_id", "stage", "attempt_no", name="uk_trace_summary_stage_attempt"),
     )
 
 

@@ -46,8 +46,8 @@ CREATE TABLE IF NOT EXISTS `paper_summary` (
     'Data_Engineering',
     'Industry_Trends'
   ) NOT NULL,
-  `one_line_summary` VARCHAR(255) DEFAULT NULL,
-  `one_line_summary_en` VARCHAR(255) DEFAULT NULL,
+  `one_line_summary` TEXT DEFAULT NULL,
+  `one_line_summary_en` TEXT DEFAULT NULL,
   `core_highlights` JSON DEFAULT NULL,
   `core_highlights_en` JSON DEFAULT NULL,
   `application_scenarios` TEXT DEFAULT NULL,
@@ -59,6 +59,21 @@ CREATE TABLE IF NOT EXISTS `paper_summary` (
   KEY `idx_category` (`category`),
   KEY `idx_direction` (`direction`),
   CONSTRAINT `fk_paper_summary_paper_id` FOREIGN KEY (`paper_id`) REFERENCES `paper` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `paper_ai_trace` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `paper_summary_id` INT NOT NULL,
+  `stage` ENUM('editor', 'writer', 'reviewer') NOT NULL,
+  `stage_status` ENUM('generated', 'accepted', 'rejected', 'invalid') NOT NULL,
+  `attempt_no` INT NOT NULL DEFAULT 1,
+  `content` TEXT NOT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_trace_summary_stage_attempt` (`paper_summary_id`, `stage`, `attempt_no`),
+  KEY `idx_trace_summary_id` (`paper_summary_id`),
+  KEY `idx_trace_stage` (`stage`),
+  CONSTRAINT `fk_paper_ai_trace_summary_id` FOREIGN KEY (`paper_summary_id`) REFERENCES `paper_summary` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `subscriber` (

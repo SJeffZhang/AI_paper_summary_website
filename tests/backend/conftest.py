@@ -10,7 +10,7 @@ from app.api.v1.subscribe import rate_limit_store
 from app.db.session import get_db
 from app.main import app
 from app.models.base import Base
-from app.models.domain import Paper, PaperSummary
+from app.models.domain import Paper, PaperAITrace, PaperSummary
 
 
 @pytest.fixture(autouse=True)
@@ -215,6 +215,70 @@ def seeded_papers(db_session: Session):
                 core_highlights_en=None,
                 application_scenarios=None,
                 application_scenarios_en=None,
+            ),
+        ]
+    )
+    db_session.flush()
+
+    current_focus_summary = (
+        db_session.query(PaperSummary)
+        .filter(PaperSummary.paper_id == paper_focus.id, PaperSummary.issue_date == current_issue_date)
+        .one()
+    )
+    current_watching_summary = (
+        db_session.query(PaperSummary)
+        .filter(PaperSummary.paper_id == paper_watching.id, PaperSummary.issue_date == current_issue_date)
+        .one()
+    )
+    db_session.add_all(
+        [
+            PaperAITrace(
+                paper_summary_id=current_focus_summary.id,
+                stage="editor",
+                stage_status="generated",
+                attempt_no=1,
+                content=(
+                    "## 论文: [2503.01001]\n"
+                    "- **写作角度**: 聚焦它如何把 Agent 能力真正推向生产环境。\n"
+                    "- **核心痛点**: 线上推理场景缺少稳定的检索增强协同框架。\n"
+                    "- **具体解法**: 通过 Agentic RAG 编排检索、规划和推理链路。"
+                ),
+            ),
+            PaperAITrace(
+                paper_summary_id=current_focus_summary.id,
+                stage="writer",
+                stage_status="generated",
+                attempt_no=1,
+                content=(
+                    "## [2503.01001]\n"
+                    "- **一句话总结**: 这篇工作把 Agentic RAG 做成了更接近生产可落地的推理框架。\n"
+                    "- **One-line Summary**: This work turns Agentic RAG into a more production-ready inference stack.\n"
+                    "- **核心亮点**:\n"
+                    "- 亮点一\n- 亮点二\n- 亮点三\n"
+                    "- **Core Highlights**:\n"
+                    "- Point 1\n- Point 2\n- Point 3\n"
+                    "- **应用场景**: 面向企业知识检索与复杂问答。\n"
+                    "- **Application Scenarios**: Enterprise retrieval and complex QA."
+                ),
+            ),
+            PaperAITrace(
+                paper_summary_id=current_focus_summary.id,
+                stage="reviewer",
+                stage_status="accepted",
+                attempt_no=1,
+                content="- **整体结论**: PASSED\n- **拒绝名单**: []",
+            ),
+            PaperAITrace(
+                paper_summary_id=current_watching_summary.id,
+                stage="editor",
+                stage_status="generated",
+                attempt_no=1,
+                content=(
+                    "## 论文: [2503.01002]\n"
+                    "- **写作角度**: 解释它为什么值得持续跟踪。\n"
+                    "- **核心痛点**: 现有研发团队缺乏对该方向的稳定观察指标。\n"
+                    "- **具体解法**: 通过更轻量的观察型总结突出长期价值。"
+                ),
             ),
         ]
     )

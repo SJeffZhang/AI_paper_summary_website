@@ -1,11 +1,16 @@
 <template>
   <div class="home-page">
     <div class="page-header">
-      <h2 v-if="lang === 'cn'">最新简报</h2>
-      <h2 v-else>Latest Briefings</h2>
-      <p class="subtitle">
-        {{ lang === 'cn' ? '每日从数百篇前沿 AI 论文中精选 3-5 篇深度解读，8-12 篇值得关注' : 'Handpicked 3-5 deep dives and 8-12 key mentions from hundreds of AI papers daily' }}
-      </p>
+      <div class="header-copy">
+        <h2 v-if="lang === 'cn'">最新简报</h2>
+        <h2 v-else>Latest Briefings</h2>
+        <p class="subtitle">
+          {{ lang === 'cn' ? '每日从数百篇前沿 AI 论文中产出最多 5 篇 Focus 与最多 12 篇 Watching，实际数量取决于当日供给与生成结果' : 'Up to 5 Focus briefs and up to 12 Watching picks daily, with actual output determined by supply and generation results' }}
+        </p>
+      </div>
+      <el-button class="topics-entry-button" type="primary" plain @click="goToTopics">
+        {{ lang === 'cn' ? '进入论文分类' : 'Browse Categories' }}
+      </el-button>
     </div>
 
     <div v-if="loading && groupedPapers.length === 0" class="loading-state">
@@ -26,7 +31,7 @@
           </el-link>
         </el-divider>
 
-        <!-- Focus Papers (Top 3-5) -->
+        <!-- Focus Papers (Up to 5) -->
         <div class="focus-section">
           <div class="section-title">
             <el-tag type="danger" effect="dark" round>Focus</el-tag>
@@ -66,7 +71,7 @@
           </el-card>
         </div>
 
-        <!-- Watching Papers (Next 8-12) -->
+        <!-- Watching Papers (Up to 12) -->
         <div v-if="group.watching.length > 0" class="watching-section">
           <div class="section-title">
             <el-tag type="info" effect="dark" round>Watching</el-tag>
@@ -176,14 +181,21 @@ const handlePageChange = (val) => {
 const goToDetail = (id) => {
   router.push(`/paper/${id}`)
 }
+
+const goToTopics = () => {
+  router.push('/topics')
+}
 </script>
 
 <style scoped>
 .page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
   margin-bottom: 30px;
 }
 
-.page-header h2 {
+.header-copy h2 {
   margin: 0;
   color: #303133;
   font-size: 24px;
@@ -193,6 +205,11 @@ const goToDetail = (id) => {
   margin: 8px 0 0 0;
   color: #909399;
   font-size: 15px;
+}
+
+.topics-entry-button {
+  flex-shrink: 0;
+  margin-left: 16px;
 }
 
 .date-group {
@@ -372,5 +389,17 @@ const goToDetail = (id) => {
   justify-content: center;
   margin-top: 50px;
   padding-bottom: 40px;
+}
+
+@media (max-width: 768px) {
+  .page-header {
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .topics-entry-button {
+    margin-left: 0;
+    width: 100%;
+  }
 }
 </style>

@@ -5,16 +5,14 @@ from typing import Any, Dict, List, Sequence, Tuple
 from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
-from app.models.domain import Paper, PaperSummary, SystemTaskLog
-from app.services.ai_processor import AIProcessor
+from app.models.domain import Paper, PaperAITrace, PaperSummary, SystemTaskLog
+from app.services.ai_processor import AIProcessor, StructuredOutputError
 from app.services.crawler import Crawler
 from app.services.scorer import Scorer
 from app.core.specs import (
     FOCUS_CAPACITY,
-    FOCUS_MINIMUM,
     FOCUS_THRESHOLD,
     WATCHING_CAPACITY,
-    WATCHING_MINIMUM,
     WATCHING_THRESHOLD,
 )
 
@@ -48,33 +46,29 @@ class Pipeline:
                 key=lambda paper: paper["score"],
                 reverse=True,
             )
+            if not scored_papers:
+                raise ValueError(f"No papers fetched for {issue_date.isoformat()}.")
 
-            focus_pool = [paper for paper in scored_papers if paper["score"] >= FOCUS_THRESHOLD]
-            watching_pool = [
-                paper
-                for paper in scored_papers
-                if WATCHING_THRESHOLD <= paper["score"] < FOCUS_THRESHOLD
-            ]
+            (
+                focus_pool,
+                watching_pool,
+                focus_selected,
+                focus_overflow,
+                watching_selected,
+                watching_overflow,
+            ) = self._select_batches(scored_papers)
 
-            if len(focus_pool) < FOCUS_MINIMUM or len(watching_pool) < WATCHING_MINIMUM:
-                raise ValueError(
-                    f"Supply insufficient for {issue_date.isoformat()}: focus={len(focus_pool)}, watching={len(watching_pool)}."
-                )
+            snapshot_papers = scored_papers
 
-            localized_titles = self.ai_processor.localize_titles(scored_papers)
-            for paper in scored_papers:
+            localized_titles = self.ai_processor.localize_titles(snapshot_papers)
+            for paper in snapshot_papers:
                 paper["title_zh"] = localized_titles[paper["arxiv_id"]]
 
-            focus_selected = focus_pool[:FOCUS_CAPACITY]
-            focus_overflow = focus_pool[FOCUS_CAPACITY:]
-            watching_selected = watching_pool[:WATCHING_CAPACITY]
-            watching_overflow = watching_pool[WATCHING_CAPACITY:]
-
-            paper_map = self._upsert_papers(scored_papers)
+            paper_map = self._upsert_papers(snapshot_papers)
             self._reset_issue_snapshots(issue_date)
             self._seed_summary_snapshots(
                 issue_date=issue_date,
-                scored_papers=scored_papers,
+                scored_papers=snapshot_papers,
                 paper_map=paper_map,
                 focus_selected_ids={paper["arxiv_id"] for paper in focus_selected},
                 watching_selected_ids={paper["arxiv_id"] for paper in watching_selected},
@@ -84,13 +78,13 @@ class Pipeline:
                 initial_batch=focus_selected,
                 overflow_batch=focus_overflow,
                 category="focus",
-                minimum=FOCUS_MINIMUM,
+                target_count=len(focus_selected),
             )
             processed_count += self._process_category_batch(
                 initial_batch=watching_selected,
                 overflow_batch=watching_overflow,
                 category="watching",
-                minimum=WATCHING_MINIMUM,
+                target_count=len(watching_selected),
             )
 
             task_log.fetched_count = fetched_count
@@ -112,6 +106,50 @@ class Pipeline:
             failed_task.finished_at = datetime.now()
             self.db.commit()
             raise
+
+    def _select_batches(
+        self,
+        scored_papers: Sequence[Dict[str, Any]],
+    ) -> Tuple[
+        List[Dict[str, Any]],
+        List[Dict[str, Any]],
+        List[Dict[str, Any]],
+        List[Dict[str, Any]],
+        List[Dict[str, Any]],
+        List[Dict[str, Any]],
+    ]:
+        focus_pool = [paper for paper in scored_papers if paper["score"] >= FOCUS_THRESHOLD]
+        focus_selected = list(focus_pool[:FOCUS_CAPACITY])
+        focus_selected_ids = {paper["arxiv_id"] for paper in focus_selected}
+        if len(focus_selected) < FOCUS_CAPACITY:
+            for paper in scored_papers:
+                if paper["arxiv_id"] in focus_selected_ids:
+                    continue
+                focus_selected.append(paper)
+                focus_selected_ids.add(paper["arxiv_id"])
+                if len(focus_selected) >= FOCUS_CAPACITY:
+                    break
+
+        focus_overflow = [paper for paper in scored_papers if paper["arxiv_id"] not in focus_selected_ids]
+        watching_pool = [
+            paper
+            for paper in scored_papers
+            if paper["arxiv_id"] not in focus_selected_ids and WATCHING_THRESHOLD <= paper["score"] < FOCUS_THRESHOLD
+        ]
+        watching_selected = list(watching_pool[:WATCHING_CAPACITY])
+        watching_selected_ids = {paper["arxiv_id"] for paper in watching_selected}
+        watching_overflow = [
+            paper for paper in watching_pool[WATCHING_CAPACITY:]
+            if paper["arxiv_id"] not in watching_selected_ids
+        ]
+        return (
+            focus_pool,
+            watching_pool,
+            focus_selected,
+            focus_overflow,
+            watching_selected,
+            watching_overflow,
+        )
 
     def _start_task(self, issue_date: date) -> SystemTaskLog:
         task_log = self.db.query(SystemTaskLog).filter(SystemTaskLog.issue_date == issue_date).first()
@@ -201,7 +239,7 @@ class Pipeline:
         initial_batch: Sequence[Dict[str, Any]],
         overflow_batch: Sequence[Dict[str, Any]],
         category: str,
-        minimum: int,
+        target_count: int,
     ) -> int:
         accepted_ids = set()
         rejected_blacklist = set()
@@ -229,10 +267,10 @@ class Pipeline:
                 self._apply_narrative(summary, result)
                 accepted_ids.add(arxiv_id)
 
-            if len(accepted_ids) >= minimum:
+            if len(accepted_ids) >= target_count:
                 return len(accepted_ids)
 
-            needed = minimum - len(accepted_ids)
+            needed = target_count - len(accepted_ids)
             pending_batch = []
             while overflow_index < len(overflow_batch) and len(pending_batch) < needed:
                 candidate = overflow_batch[overflow_index]
@@ -243,12 +281,8 @@ class Pipeline:
                 pending_batch.append(candidate)
 
             if not pending_batch:
-                raise ValueError(
-                    f"{category} batch fell below baseline and no eligible backfill candidates remained."
-                )
+                return len(accepted_ids)
 
-        if len(accepted_ids) < minimum:
-            raise ValueError(f"{category} batch completed below minimum baseline.")
         return len(accepted_ids)
 
     def _run_ai_batch(
@@ -258,12 +292,34 @@ class Pipeline:
     ) -> Tuple[List[Dict[str, Any]], List[str]]:
         max_retries = 2
         editor_brief = None
+        editor_records: List[Dict[str, Any]] = []
 
         for attempt in range(max_retries + 1):
+            editor_brief = None
             try:
                 editor_brief = self.ai_processor.run_editor(papers, category)
+                editor_records = self.ai_processor.parse_editor_records(editor_brief, papers)
+                self._record_editor_traces(papers, editor_records, attempt_no=attempt + 1)
                 break
+            except StructuredOutputError as exc:
+                self._record_uniform_stage_traces(
+                    papers,
+                    stage="editor",
+                    stage_status="invalid",
+                    attempt_no=attempt + 1,
+                    content=exc.raw_output,
+                )
+                if attempt >= max_retries:
+                    raise
             except Exception:
+                if editor_brief:
+                    self._record_uniform_stage_traces(
+                        papers,
+                        stage="editor",
+                        stage_status="invalid",
+                        attempt_no=attempt + 1,
+                        content=editor_brief,
+                    )
                 if attempt >= max_retries:
                     raise
 
@@ -274,6 +330,7 @@ class Pipeline:
         last_rejected_ids: List[str] = []
 
         for attempt in range(max_retries + 1):
+            writer_output = None
             try:
                 writer_output = self.ai_processor.run_writer(
                     editor_brief=editor_brief,
@@ -281,9 +338,66 @@ class Pipeline:
                     category=category,
                     history=writer_history,
                 )
+                writer_records = self.ai_processor.parse_writer_records(writer_output, papers, category)
+                self._record_writer_traces(papers, writer_records, attempt_no=attempt + 1)
+            except StructuredOutputError as exc:
+                self._record_uniform_stage_traces(
+                    papers,
+                    stage="writer",
+                    stage_status="invalid",
+                    attempt_no=attempt + 1,
+                    content=exc.raw_output,
+                )
+                if attempt >= max_retries:
+                    raise
+                writer_history.append(
+                    {
+                        "role": "user",
+                        "content": f"The previous output failed validation: {exc}. Regenerate the FULL batch strictly.",
+                    }
+                )
+                continue
+            except Exception as exc:
+                if writer_output:
+                    self._record_uniform_stage_traces(
+                        papers,
+                        stage="writer",
+                        stage_status="invalid",
+                        attempt_no=attempt + 1,
+                        content=writer_output,
+                    )
+                if attempt >= max_retries:
+                    raise
+                writer_history.append(
+                    {
+                        "role": "user",
+                        "content": f"The previous output failed validation: {exc}. Regenerate the FULL batch strictly.",
+                    }
+                )
+                continue
+
+            try:
                 review_result = self.ai_processor.run_reviewer(writer_output)
                 rejected_ids = review_result["rejected_ids"] if review_result["status"] == "REJECTED" else []
-                parsed_results = self.ai_processor.parse_final_summaries(writer_output, rejected_ids, category)
+                self._record_reviewer_traces(
+                    papers,
+                    review_output=review_result["raw_output"],
+                    rejected_ids=rejected_ids,
+                    attempt_no=attempt + 1,
+                )
+                parsed_results = [
+                    {
+                        "arxiv_id": record["arxiv_id"],
+                        "one_line_summary": record["one_line_summary"],
+                        "one_line_summary_en": record["one_line_summary_en"],
+                        "core_highlights": record["core_highlights"],
+                        "core_highlights_en": record["core_highlights_en"],
+                        "application_scenarios": record["application_scenarios"],
+                        "application_scenarios_en": record["application_scenarios_en"],
+                    }
+                    for record in writer_records
+                    if record["arxiv_id"] not in set(rejected_ids)
+                ]
 
                 if review_result["status"] == "PASSED":
                     return parsed_results, []
@@ -305,6 +419,22 @@ class Pipeline:
                         },
                     ]
                 )
+            except StructuredOutputError as exc:
+                self._record_uniform_stage_traces(
+                    papers,
+                    stage="reviewer",
+                    stage_status="invalid",
+                    attempt_no=attempt + 1,
+                    content=exc.raw_output,
+                )
+                if attempt >= max_retries:
+                    raise
+                writer_history.append(
+                    {
+                        "role": "user",
+                        "content": f"The previous output failed validation: {exc}. Regenerate the FULL batch strictly.",
+                    }
+                )
             except Exception as exc:
                 if attempt >= max_retries:
                     raise
@@ -316,6 +446,92 @@ class Pipeline:
                 )
 
         return [], last_rejected_ids
+
+    def _record_uniform_stage_traces(
+        self,
+        papers: Sequence[Dict[str, Any]],
+        stage: str,
+        stage_status: str,
+        attempt_no: int,
+        content: str | None,
+    ) -> None:
+        if not content:
+            return
+        for paper in papers:
+            self.db.add(
+                PaperAITrace(
+                    paper_summary_id=paper["_summary"].id,
+                    stage=stage,
+                    stage_status=stage_status,
+                    attempt_no=attempt_no,
+                    content=content,
+                )
+            )
+        self.db.flush()
+
+    def _record_editor_traces(
+        self,
+        papers: Sequence[Dict[str, Any]],
+        editor_records: Sequence[Dict[str, Any]],
+        attempt_no: int,
+    ) -> None:
+        record_map = {record["arxiv_id"]: record for record in editor_records}
+        for paper in papers:
+            record = record_map.get(paper["arxiv_id"])
+            if record is None:
+                raise ValueError(f"Missing editor trace record for {paper['arxiv_id']}.")
+            self.db.add(
+                PaperAITrace(
+                    paper_summary_id=paper["_summary"].id,
+                    stage="editor",
+                    stage_status="generated",
+                    attempt_no=attempt_no,
+                    content=record["content"],
+                )
+            )
+        self.db.flush()
+
+    def _record_writer_traces(
+        self,
+        papers: Sequence[Dict[str, Any]],
+        writer_records: Sequence[Dict[str, Any]],
+        attempt_no: int,
+    ) -> None:
+        record_map = {record["arxiv_id"]: record for record in writer_records}
+        for paper in papers:
+            record = record_map.get(paper["arxiv_id"])
+            if record is None:
+                raise ValueError(f"Missing writer trace record for {paper['arxiv_id']}.")
+            self.db.add(
+                PaperAITrace(
+                    paper_summary_id=paper["_summary"].id,
+                    stage="writer",
+                    stage_status="generated",
+                    attempt_no=attempt_no,
+                    content=record["content"],
+                )
+            )
+        self.db.flush()
+
+    def _record_reviewer_traces(
+        self,
+        papers: Sequence[Dict[str, Any]],
+        review_output: str,
+        rejected_ids: Sequence[str],
+        attempt_no: int,
+    ) -> None:
+        rejected_set = set(rejected_ids)
+        for paper in papers:
+            self.db.add(
+                PaperAITrace(
+                    paper_summary_id=paper["_summary"].id,
+                    stage="reviewer",
+                    stage_status="rejected" if paper["arxiv_id"] in rejected_set else "accepted",
+                    attempt_no=attempt_no,
+                    content=review_output,
+                )
+            )
+        self.db.flush()
 
     @staticmethod
     def _promote_summary(summary: PaperSummary, category: str) -> None:

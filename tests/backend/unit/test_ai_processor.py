@@ -42,6 +42,87 @@ def test_split_markdown_blocks_supports_bracketless_editor_headers():
     assert records[0][0] == "2503.00001"
 
 
+def test_parse_editor_records_returns_structured_trace_blocks():
+    processor = AIProcessor(api_key="test-key")
+    editor_output = (
+        "## 论文: 2503.00001\n"
+        "- **写作角度**: 从生产落地角度切入。\n"
+        "- **核心痛点**: 线上检索增强链路缺少稳定编排。\n"
+        "- **具体解法**: 用统一 Agent 流程连接检索与推理。\n"
+    )
+
+    records = processor.parse_editor_records(
+        editor_output,
+        [{"arxiv_id": "2503.00001"}],
+    )
+
+    assert records[0]["writing_angle"] == "从生产落地角度切入。"
+    assert records[0]["content"].startswith("## 论文: [2503.00001]")
+
+
+def test_run_writer_accepts_bracketless_editor_headers(monkeypatch):
+    processor = AIProcessor(api_key="test-key")
+    editor_brief = (
+        "## 论文: 2503.00001\n"
+        "- **写作角度**: demo\n"
+        "- **核心痛点**: demo\n"
+        "- **具体解法**: demo\n"
+    )
+    papers_metadata = [
+        {
+            "arxiv_id": "2503.00001",
+            "title_zh": "中文标题",
+            "title_original": "Original Title",
+            "direction": "Agent",
+            "venue": "ICLR 2026",
+            "abstract": "demo abstract",
+        }
+    ]
+
+    monkeypatch.setattr(
+        processor,
+        "_call_llm",
+        lambda system_prompt, user_content, history=None, **kwargs: (
+            "## [2503.00001]\n"
+            "- **一句话总结**: 中文总结\n"
+            "- **One-line Summary**: English summary\n"
+            "- **核心亮点**:\n"
+            "- 亮点一\n- 亮点二\n- 亮点三\n"
+            "- **Core Highlights**:\n"
+            "- Point 1\n- Point 2\n- Point 3\n"
+            "- **应用场景**: 中文场景\n"
+            "- **Application Scenarios**: English scenario\n"
+        ),
+    )
+
+    output = processor.run_writer(editor_brief, papers_metadata, "focus")
+    assert "## [2503.00001]" in output
+
+
+def test_parse_writer_records_returns_trace_content_and_summary_fields():
+    processor = AIProcessor(api_key="test-key")
+    writer_output = (
+        "## [2503.00001]\n"
+        "- **一句话总结**: 中文总结\n"
+        "- **One-line Summary**: English summary\n"
+        "- **核心亮点**:\n"
+        "- 亮点一\n- 亮点二\n- 亮点三\n"
+        "- **Core Highlights**:\n"
+        "- Point 1\n- Point 2\n- Point 3\n"
+        "- **应用场景**: 中文场景\n"
+        "- **Application Scenarios**: English scenario\n"
+    )
+
+    records = processor.parse_writer_records(
+        writer_output,
+        [{"arxiv_id": "2503.00001"}],
+        "focus",
+    )
+
+    assert records[0]["one_line_summary"] == "中文总结"
+    assert records[0]["content"].startswith("## [2503.00001]")
+
+
 def test_run_reviewer_rejects_invalid_ids(monkeypatch):
     processor = AIProcessor(api_key="test-key")
     writer_output = (
@@ -108,3 +189,4 @@ def test_parse_final_summaries_validates_highlight_symmetry():
 
     with pytest.raises(ValueError, match="asymmetric"):
         AIProcessor(api_key="test-key").parse_final_summaries(writer_output, [], "focus")
+

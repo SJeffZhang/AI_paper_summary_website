@@ -11,6 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.core.config import settings
+from app.core.specs import FOCUS_CAPACITY, FOCUS_THRESHOLD, WATCHING_CAPACITY, WATCHING_THRESHOLD
 from app.db.session import SessionLocal, rebuild_engine
 from app.models.domain import PaperSummary, SystemTaskLog
 from app.services.crawler import Crawler
@@ -39,7 +40,7 @@ def _probe_issue_date() -> dict[str, object]:
     scorer = Scorer()
     today = datetime.now(timezone(timedelta(hours=8))).date()
     probe_days = int(settings.PIPELINE_PROBE_DAYS or 14)
-
+    fallback_probe: dict[str, object] | None = None
     db = SessionLocal()
     try:
         for offset in range(probe_days):
@@ -59,9 +60,40 @@ def _probe_issue_date() -> dict[str, object]:
                 flush=True,
             )
             papers = crawler.fetch_papers(fetch_date=fetch_date.isoformat())
-            scored = [scorer.score_paper(paper) for paper in papers]
-            focus_count = sum(1 for paper in scored if paper["score"] >= 80)
-            watching_count = sum(1 for paper in scored if 50 <= paper["score"] < 80)
+            scored = sorted(
+                [scorer.score_paper(paper) for paper in papers],
+                key=lambda paper: paper["score"],
+                reverse=True,
+            )
+            if not scored:
+                print(f"[probe] issue_date={issue_date.isoformat()} fetched=0", flush=True)
+                continue
+
+            focus_selected_ids = set()
+            focus_selected = []
+            for paper in scored:
+                if paper["score"] >= FOCUS_THRESHOLD:
+                    focus_selected.append(paper)
+                    focus_selected_ids.add(paper["arxiv_id"])
+                if len(focus_selected) >= FOCUS_CAPACITY:
+                    break
+
+            if len(focus_selected) < FOCUS_CAPACITY:
+                for paper in scored:
+                    if paper["arxiv_id"] in focus_selected_ids:
+                        continue
+                    focus_selected.append(paper)
+                    focus_selected_ids.add(paper["arxiv_id"])
+                    if len(focus_selected) >= FOCUS_CAPACITY:
+                        break
+
+            watching_selected = [
+                paper
+                for paper in scored
+                if paper["arxiv_id"] not in focus_selected_ids and WATCHING_THRESHOLD <= paper["score"] < FOCUS_THRESHOLD
+            ][:WATCHING_CAPACITY]
+            focus_count = len(focus_selected)
+            watching_count = len(watching_selected)
             print(
                 (
                     f"[probe] issue_date={issue_date.isoformat()} fetched={len(papers)} "
@@ -70,19 +102,30 @@ def _probe_issue_date() -> dict[str, object]:
                 flush=True,
             )
 
-            if focus_count >= 3 and watching_count >= 8:
+            probe_result = {
+                "issue_date": issue_date.isoformat(),
+                "fetch_date": fetch_date.isoformat(),
+                "fetched_count": len(papers),
+                "focus_count": focus_count,
+                "watching_count": watching_count,
+            }
+            if fallback_probe is None:
+                fallback_probe = probe_result
+
+            if focus_count >= FOCUS_CAPACITY:
                 return {
-                    "issue_date": issue_date.isoformat(),
-                    "fetch_date": fetch_date.isoformat(),
-                    "fetched_count": len(papers),
-                    "focus_count": focus_count,
-                    "watching_count": watching_count,
+                    **probe_result,
+                    "fallback_probe": False,
                 }
     finally:
         db.close()
 
+    if fallback_probe is not None:
+        fallback_probe["fallback_probe"] = True
+        return fallback_probe
+
     raise RuntimeError(
-        f"No eligible issue_date was found in the last {probe_days} days that satisfies focus>=3 and watching>=8."
+        f"No non-empty issue_date was found in the last {probe_days} days."
     )
 
 

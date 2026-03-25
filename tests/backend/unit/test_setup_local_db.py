@@ -72,6 +72,27 @@ def test_find_schema_mismatches_accepts_current_v225_sentinels():
                 "extra": "on update current_timestamp",
             },
         },
+        "paper_ai_trace": {
+            "id": {"type": "int", "null": "NO", "key": "PRI", "default": None, "extra": "auto_increment"},
+            "paper_summary_id": {"type": "int", "null": "NO", "key": "MUL", "default": None, "extra": ""},
+            "stage": {
+                "type": "enum('editor','writer','reviewer')",
+                "null": "NO",
+                "key": "MUL",
+                "default": None,
+                "extra": "",
+            },
+            "stage_status": {
+                "type": "enum('generated','accepted','rejected','invalid')",
+                "null": "NO",
+                "key": "",
+                "default": None,
+                "extra": "",
+            },
+            "attempt_no": {"type": "int", "null": "NO", "key": "", "default": "1", "extra": ""},
+            "content": {"type": "text", "null": "NO", "key": "", "default": None, "extra": ""},
+            "created_at": {"type": "datetime", "null": "NO", "key": "", "default": "current_timestamp", "extra": ""},
+        },
         "system_task_log": {
             "id": {"type": "int", "null": "NO", "key": "PRI", "default": None, "extra": "auto_increment"},
             "issue_date": {"type": "date", "null": "NO", "key": "UNI", "default": None, "extra": ""},
@@ -86,11 +107,13 @@ def test_find_schema_mismatches_accepts_current_v225_sentinels():
     index_snapshot = {
         "paper": {"PRIMARY", "uk_arxiv_id", "idx_publish_date"},
         "paper_summary": {"PRIMARY", "uk_paper_issue", "idx_issue_date", "idx_category", "idx_direction"},
+        "paper_ai_trace": {"PRIMARY", "uk_trace_summary_stage_attempt", "idx_trace_summary_id", "idx_trace_stage"},
         "subscriber": {"PRIMARY", "uk_email", "uk_verify_token", "uk_unsub_token", "idx_status"},
         "system_task_log": {"PRIMARY", "uk_issue_date"},
     }
     foreign_key_snapshot = {
         "paper_summary": {"fk_paper_summary_paper_id"},
+        "paper_ai_trace": {"fk_paper_ai_trace_summary_id"},
     }
 
     assert _find_schema_mismatches(column_snapshot, index_snapshot, foreign_key_snapshot) == []
@@ -129,6 +152,7 @@ def test_find_schema_mismatches_flags_old_schema_shapes():
     assert any("paper.title_original" in mismatch for mismatch in mismatches)
     assert any("paper_summary.candidate_reason" in mismatch for mismatch in mismatches)
     assert any("paper_summary.one_line_summary" in mismatch for mismatch in mismatches)
+    assert any("missing table `paper_ai_trace`" in mismatch for mismatch in mismatches)
     assert any("subscriber.unsub_token" in mismatch for mismatch in mismatches)
     assert any("system_task_log.error_log" in mismatch for mismatch in mismatches)
     assert any("paper_summary.uk_paper_issue" in mismatch for mismatch in mismatches)

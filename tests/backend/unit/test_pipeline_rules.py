@@ -2,7 +2,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.models.domain import PaperSummary
+from app.models.domain import Paper, PaperAITrace, PaperSummary, SystemTaskLog
+from app.services.ai_processor import StructuredOutputError
 from app.services.pipeline import Pipeline
 
 
@@ -156,7 +157,7 @@ def test_process_category_batch_backfills_after_rejection():
         initial_batch=initial_batch,
         overflow_batch=overflow_batch,
         category="focus",
-        minimum=2,
+        target_count=2,
     )
 
     assert processed_count == 2
@@ -171,7 +172,7 @@ def test_process_category_batch_backfills_after_rejection():
     assert overflow_summary.one_line_summary == "中文 C"
 
 
-def test_process_category_batch_raises_when_baseline_cannot_be_met():
+def test_process_category_batch_returns_partial_count_when_backfill_is_exhausted():
     accepted_summary = SimpleNamespace(
         category="watching",
         candidate_reason=None,
@@ -199,16 +200,202 @@ def test_process_category_batch_raises_when_baseline_cannot_be_met():
         [],
     )
 
-    with pytest.raises(ValueError, match="no eligible backfill candidates remained"):
-        pipeline._process_category_batch(
-            initial_batch=[{"arxiv_id": "watch-1", "_summary": accepted_summary}],
-            overflow_batch=[],
-            category="watching",
-            minimum=2,
-        )
+    processed_count = pipeline._process_category_batch(
+        initial_batch=[{"arxiv_id": "watch-1", "_summary": accepted_summary}],
+        overflow_batch=[],
+        category="watching",
+        target_count=2,
+    )
+
+    assert processed_count == 1
+    assert accepted_summary.category == "watching"
+    assert accepted_summary.one_line_summary == "中文"
 
 
-def test_run_fails_before_title_localization_when_supply_is_insufficient(db_session):
+def test_run_ai_batch_persists_editor_writer_and_reviewer_traces(db_session):
+    paper = Paper(
+        arxiv_id="2503.22001",
+        title_zh="测试标题",
+        title_original="Test Title",
+        authors=[{"name": "Alice", "affiliation": "OpenAI"}],
+        venue="ICLR 2026",
+        abstract="Test abstract",
+        pdf_url="https://arxiv.org/pdf/2503.22001.pdf",
+        upvotes=10,
+        arxiv_publish_date=Pipeline._resolve_issue_date("2026-03-20"),
+    )
+    db_session.add(paper)
+    db_session.flush()
+
+    summary = PaperSummary(
+        paper_id=paper.id,
+        issue_date=Pipeline._resolve_issue_date("2026-03-23"),
+        score=95,
+        score_reasons={},
+        category="focus",
+        candidate_reason=None,
+        direction="Agent",
+    )
+    db_session.add(summary)
+    db_session.flush()
+
+    pipeline = Pipeline(db_session)
+    pipeline.ai_processor.run_editor = lambda papers, category: "editor-output"
+    pipeline.ai_processor.parse_editor_records = lambda output, papers: [
+        {
+            "arxiv_id": "2503.22001",
+            "writing_angle": "生产落地",
+            "core_problem": "推理链路不稳",
+            "solution": "统一编排",
+            "content": "## 论文: [2503.22001]\n- **写作角度**: 生产落地",
+        }
+    ]
+    pipeline.ai_processor.run_writer = lambda editor_brief, papers_metadata, category, history=None: "writer-output"
+    pipeline.ai_processor.parse_writer_records = lambda writer_output, papers_metadata, category: [
+        {
+            "arxiv_id": "2503.22001",
+            "one_line_summary": "中文总结",
+            "one_line_summary_en": "English summary",
+            "core_highlights": ["亮点一", "亮点二", "亮点三"],
+            "core_highlights_en": ["Point 1", "Point 2", "Point 3"],
+            "application_scenarios": "中文场景",
+            "application_scenarios_en": "English scenario",
+            "content": "## [2503.22001]\n- **一句话总结**: 中文总结",
+        }
+    ]
+    pipeline.ai_processor.run_reviewer = lambda writer_output: {
+        "status": "PASSED",
+        "rejected_ids": [],
+        "raw_output": "- **整体结论**: PASSED\n- **拒绝名单**: []",
+    }
+
+    results, rejected_ids = pipeline._run_ai_batch(
+        [{"arxiv_id": "2503.22001", "_summary": summary}],
+        "focus",
+    )
+
+    traces = (
+        db_session.query(PaperAITrace)
+        .filter(PaperAITrace.paper_summary_id == summary.id)
+        .order_by(PaperAITrace.id.asc())
+        .all()
+    )
+
+    assert rejected_ids == []
+    assert results[0]["one_line_summary"] == "中文总结"
+    assert [trace.stage for trace in traces] == ["editor", "writer", "reviewer"]
+    assert traces[2].stage_status == "accepted"
+    assert traces[1].content.startswith("## [2503.22001]")
+
+
+def test_run_ai_batch_persists_invalid_attempt_traces(db_session):
+    paper = Paper(
+        arxiv_id="2503.22002",
+        title_zh="测试标题二",
+        title_original="Test Title Two",
+        authors=[{"name": "Bob", "affiliation": "OpenAI"}],
+        venue="ICLR 2026",
+        abstract="Test abstract",
+        pdf_url="https://arxiv.org/pdf/2503.22002.pdf",
+        upvotes=10,
+        arxiv_publish_date=Pipeline._resolve_issue_date("2026-03-20"),
+    )
+    db_session.add(paper)
+    db_session.flush()
+
+    summary = PaperSummary(
+        paper_id=paper.id,
+        issue_date=Pipeline._resolve_issue_date("2026-03-23"),
+        score=95,
+        score_reasons={},
+        category="focus",
+        candidate_reason=None,
+        direction="Agent",
+    )
+    db_session.add(summary)
+    db_session.flush()
+
+    pipeline = Pipeline(db_session)
+    editor_attempts = {"count": 0}
+    writer_attempts = {"count": 0}
+    reviewer_attempts = {"count": 0}
+
+    def fake_run_editor(papers, category):
+        editor_attempts["count"] += 1
+        if editor_attempts["count"] == 1:
+            raise StructuredOutputError("Editor zero-prefix failure", "bad editor output")
+        return "editor-output"
+
+    def fake_run_writer(editor_brief, papers_metadata, category, history=None):
+        writer_attempts["count"] += 1
+        if writer_attempts["count"] == 1:
+            raise StructuredOutputError("Writer format failure", "bad writer output")
+        return f"writer-output-{writer_attempts['count']}"
+
+    def fake_run_reviewer(writer_output):
+        reviewer_attempts["count"] += 1
+        if reviewer_attempts["count"] == 1:
+            raise StructuredOutputError("Reviewer wrapper noise", "bad reviewer output")
+        return {
+            "status": "PASSED",
+            "rejected_ids": [],
+            "raw_output": "- **整体结论**: PASSED\n- **拒绝名单**: []",
+        }
+
+    pipeline.ai_processor.run_editor = fake_run_editor
+    pipeline.ai_processor.parse_editor_records = lambda output, papers: [
+        {
+            "arxiv_id": "2503.22002",
+            "writing_angle": "生产落地",
+            "core_problem": "推理链路不稳",
+            "solution": "统一编排",
+            "content": "## 论文: [2503.22002]\n- **写作角度**: 生产落地",
+        }
+    ]
+    pipeline.ai_processor.run_writer = fake_run_writer
+    pipeline.ai_processor.parse_writer_records = lambda writer_output, papers_metadata, category: [
+        {
+            "arxiv_id": "2503.22002",
+            "one_line_summary": f"中文总结 {writer_output}",
+            "one_line_summary_en": f"English summary {writer_output}",
+            "core_highlights": ["亮点一", "亮点二", "亮点三"],
+            "core_highlights_en": ["Point 1", "Point 2", "Point 3"],
+            "application_scenarios": "中文场景",
+            "application_scenarios_en": "English scenario",
+            "content": f"## [2503.22002]\n- **一句话总结**: 中文总结 {writer_output}",
+        }
+    ]
+    pipeline.ai_processor.run_reviewer = fake_run_reviewer
+
+    results, rejected_ids = pipeline._run_ai_batch(
+        [{"arxiv_id": "2503.22002", "_summary": summary}],
+        "focus",
+    )
+
+    traces = (
+        db_session.query(PaperAITrace)
+        .filter(PaperAITrace.paper_summary_id == summary.id)
+        .order_by(PaperAITrace.id.asc())
+        .all()
+    )
+
+    assert rejected_ids == []
+    assert results[0]["one_line_summary"] == "中文总结 writer-output-3"
+    assert [(trace.stage, trace.attempt_no, trace.stage_status) for trace in traces] == [
+        ("editor", 1, "invalid"),
+        ("editor", 2, "generated"),
+        ("writer", 1, "invalid"),
+        ("writer", 2, "generated"),
+        ("reviewer", 2, "invalid"),
+        ("writer", 3, "generated"),
+        ("reviewer", 3, "accepted"),
+    ]
+    assert traces[0].content == "bad editor output"
+    assert traces[2].content == "bad writer output"
+    assert traces[4].content == "bad reviewer output"
+
+
+def test_run_uses_quantity_first_fallback_when_supply_is_insufficient(db_session):
     pipeline = Pipeline(db_session)
     pipeline.crawler.fetch_papers = lambda fetch_date: [
         {"arxiv_id": "paper-focus"},
@@ -228,10 +415,135 @@ def test_run_fails_before_title_localization_when_supply_is_insufficient(db_sess
         "direction": "Agent",
     }
 
-    def fail_if_called(_papers):
-        raise AssertionError("title localization should not run before the focus/watching supply audit")
+    localized_batches = []
+    ai_calls = []
+    pipeline.ai_processor.localize_titles = lambda papers: (
+        localized_batches.append([paper["arxiv_id"] for paper in papers]) or
+        {paper["arxiv_id"]: f"中文标题 {paper['arxiv_id']}" for paper in papers}
+    )
+    pipeline._run_ai_batch = lambda papers, category: (
+        ai_calls.append((category, [paper["arxiv_id"] for paper in papers])) or
+        (
+            [
+                {
+                    "arxiv_id": paper["arxiv_id"],
+                    "one_line_summary": f"中文总结 {paper['arxiv_id']}",
+                    "one_line_summary_en": f"English summary {paper['arxiv_id']}",
+                    "core_highlights": ["亮点一", "亮点二", "亮点三"],
+                    "core_highlights_en": ["Point 1", "Point 2", "Point 3"],
+                    "application_scenarios": f"场景 {paper['arxiv_id']}",
+                    "application_scenarios_en": f"Scenario {paper['arxiv_id']}",
+                }
+                for paper in papers
+            ],
+            [],
+        )
+    )
 
-    pipeline.ai_processor.localize_titles = fail_if_called
+    pipeline.run("2026-03-23")
 
-    with pytest.raises(ValueError, match="Supply insufficient"):
-        pipeline.run("2026-03-23")
+    task_log = (
+        db_session.query(SystemTaskLog)
+        .filter(SystemTaskLog.issue_date == Pipeline._resolve_issue_date("2026-03-23"))
+        .one()
+    )
+    summaries = (
+        db_session.query(PaperSummary)
+        .filter(PaperSummary.issue_date == Pipeline._resolve_issue_date("2026-03-23"))
+        .all()
+    )
+
+    assert localized_batches == [["paper-focus", "paper-watch"]]
+    assert ai_calls == [("focus", ["paper-focus", "paper-watch"])]
+    assert task_log.status == "SUCCESS"
+    assert task_log.processed_count == 2
+    assert len(summaries) == 2
+    assert all(summary.category == "focus" for summary in summaries)
+
+
+def test_quantity_first_pipeline_uses_full_snapshots_and_standard_ai_batches(db_session):
+    pipeline = Pipeline(db_session)
+    raw_ids = [f"paper-{index}" for index in range(11)]
+    score_map = {
+        "paper-0": 95,
+        "paper-1": 92,
+        "paper-2": 89,
+        "paper-3": 79,
+        "paper-4": 78,
+        "paper-5": 77,
+        "paper-6": 76,
+        "paper-7": 75,
+        "paper-8": 74,
+        "paper-9": 73,
+        "paper-10": 72,
+    }
+
+    pipeline.crawler.fetch_papers = lambda fetch_date: [
+        {"arxiv_id": paper_id} for paper_id in raw_ids
+    ]
+    pipeline.scorer.score_paper = lambda paper: {
+        "arxiv_id": paper["arxiv_id"],
+        "title_original": f"Original {paper['arxiv_id']}",
+        "authors": [{"name": "Author", "affiliation": "OpenAI"}],
+        "venue": "ICLR 2026" if score_map[paper["arxiv_id"]] >= 80 else None,
+        "abstract": f"Abstract {paper['arxiv_id']}",
+        "pdf_url": f"https://arxiv.org/pdf/{paper['arxiv_id']}.pdf",
+        "upvotes": 0,
+        "arxiv_publish_date": "2026-03-20",
+        "score": score_map[paper["arxiv_id"]],
+        "score_reasons": {},
+        "direction": "Agent",
+    }
+
+    localized_batches = []
+    ai_calls = []
+
+    def fake_localize_titles(papers):
+        localized_batches.append([paper["arxiv_id"] for paper in papers])
+        return {paper["arxiv_id"]: f"中文标题 {paper['arxiv_id']}" for paper in papers}
+
+    def fake_run_ai_batch(papers, category):
+        ai_calls.append((category, [paper["arxiv_id"] for paper in papers]))
+        return (
+            [
+                {
+                    "arxiv_id": paper["arxiv_id"],
+                    "one_line_summary": f"中文总结 {paper['arxiv_id']}",
+                    "one_line_summary_en": f"English summary {paper['arxiv_id']}",
+                    "core_highlights": ["亮点一", "亮点二", "亮点三"],
+                    "core_highlights_en": ["Point 1", "Point 2", "Point 3"],
+                    "application_scenarios": f"场景 {paper['arxiv_id']}",
+                    "application_scenarios_en": f"Scenario {paper['arxiv_id']}",
+                }
+                for paper in papers
+            ],
+            [],
+        )
+
+    pipeline.ai_processor.localize_titles = fake_localize_titles
+    pipeline._run_ai_batch = fake_run_ai_batch
+
+    pipeline.run("2026-03-23")
+
+    issue_date = Pipeline._resolve_issue_date("2026-03-23")
+    task_log = (
+        db_session.query(SystemTaskLog)
+        .filter(SystemTaskLog.issue_date == issue_date)
+        .one()
+    )
+    summaries = (
+        db_session.query(PaperSummary)
+        .filter(PaperSummary.issue_date == issue_date)
+        .all()
+    )
+
+    assert task_log.status == "SUCCESS"
+    assert task_log.processed_count == 11
+    assert localized_batches == [raw_ids]
+    assert ai_calls == [
+        ("focus", ["paper-0", "paper-1", "paper-2", "paper-3", "paper-4"]),
+        ("watching", ["paper-5", "paper-6", "paper-7", "paper-8", "paper-9", "paper-10"]),
+    ]
+    assert len(summaries) == 11
+    assert sum(1 for summary in summaries if summary.category == "focus") == 5
+    assert sum(1 for summary in summaries if summary.category == "watching") == 6
