@@ -48,9 +48,6 @@ class Pipeline:
                 key=lambda paper: paper["score"],
                 reverse=True,
             )
-            localized_titles = self.ai_processor.localize_titles(scored_papers)
-            for paper in scored_papers:
-                paper["title_zh"] = localized_titles[paper["arxiv_id"]]
 
             focus_pool = [paper for paper in scored_papers if paper["score"] >= FOCUS_THRESHOLD]
             watching_pool = [
@@ -63,6 +60,10 @@ class Pipeline:
                 raise ValueError(
                     f"Supply insufficient for {issue_date.isoformat()}: focus={len(focus_pool)}, watching={len(watching_pool)}."
                 )
+
+            localized_titles = self.ai_processor.localize_titles(scored_papers)
+            for paper in scored_papers:
+                paper["title_zh"] = localized_titles[paper["arxiv_id"]]
 
             focus_selected = focus_pool[:FOCUS_CAPACITY]
             focus_overflow = focus_pool[FOCUS_CAPACITY:]

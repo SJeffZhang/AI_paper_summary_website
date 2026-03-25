@@ -109,19 +109,21 @@ def get_paper_detail(paper_id: int, db: Session = Depends(get_db)):
 
     summary, paper = row
     list_item = _serialize_list_item(summary, paper)
+    detail_payload = list_item.model_dump()
+    detail_payload.update(
+        {
+            "authors": _normalize_authors(paper.authors),
+            "venue": paper.venue,
+            "abstract": paper.abstract,
+            "pdf_url": paper.pdf_url,
+            "arxiv_publish_date": paper.arxiv_publish_date,
+            "core_highlights": summary.core_highlights,
+            "core_highlights_en": summary.core_highlights_en,
+            "application_scenarios": summary.application_scenarios,
+            "application_scenarios_en": summary.application_scenarios_en,
+        }
+    )
 
     return PaperDetailResponseModel(
-        data=PaperDetail(
-            **list_item.model_dump(),
-            authors=_normalize_authors(paper.authors),
-            venue=paper.venue,
-            abstract=paper.abstract,
-            pdf_url=paper.pdf_url,
-            arxiv_publish_date=paper.arxiv_publish_date,
-            score_reasons=summary.score_reasons,
-            core_highlights=summary.core_highlights,
-            core_highlights_en=summary.core_highlights_en,
-            application_scenarios=summary.application_scenarios,
-            application_scenarios_en=summary.application_scenarios_en,
-        )
+        data=PaperDetail(**detail_payload)
     )

@@ -196,8 +196,8 @@
 | 6. `category` | ENUM('focus', 'watching', 'candidate') | INDEX, NOT NULL | 档位快照 |
 | 7. `candidate_reason`| ENUM('low_score', 'capacity_overflow', 'reviewer_rejected') | NULL | 候选原因 (仅 category=candidate 时有效) |
 | 8. `direction` | ENUM('Agent', 'Reasoning', 'Training_Opt', 'RAG', 'Multimodal', 'Code_Intelligence', 'Vision_Image', 'Video', 'Safety_Alignment', 'Robotics', 'Audio', 'Interpretability', 'Benchmarking', 'Data_Engineering', 'Industry_Trends') | INDEX, NOT NULL | 分类快照 |
-| 9. `one_line_summary` | VARCHAR(255) | NULL | 中文一句话总结 |
-| 10. `one_line_summary_en` | VARCHAR(255) | NULL | 英文一句话总结 |
+| 9. `one_line_summary` | TEXT | NULL | 中文一句话总结 |
+| 10. `one_line_summary_en` | TEXT | NULL | 英文一句话总结 |
 | 11. `core_highlights` | JSON | NULL | 中文核心亮点 (List) |
 | 12. `core_highlights_en` | JSON | NULL | 英文核心亮点 (List) |
 | 13. `application_scenarios` | TEXT | NULL | 中文应用场景 |
@@ -259,6 +259,6 @@
 ---
 
 ## 7. 运维与安全规格 (Ops)
-*   **超时配置**: Semantic Scholar (5s), arXiv (30s), LLM (60s)。
+*   **超时配置**: Semantic Scholar (5s), arXiv (30s), KIMI 短请求 (60s), KIMI 长文本请求 (180s)。
 *   **限流策略**: 针对 `/subscribe` 相关写入接口，限制 5 次/小时/IP。
 *   **Token 有效期**: `verify_token` 与 `unsub_token` 统一设为 **24 小时**。

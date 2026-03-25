@@ -3,7 +3,7 @@ import os
 import re
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-import requests
+from openai import APIConnectionError, APIError, APITimeoutError, AuthenticationError, OpenAI, PermissionDeniedError, RateLimitError
 
 from app.core.config import settings
 
@@ -15,10 +15,13 @@ class AIProcessor:
     """
 
     CJK_PATTERN = re.compile(r"[\u3400-\u4DBF\u4E00-\u9FFF]")
+    EDITOR_BLOCK_PATTERN = r"## 论文:\s*\[?(.*?)\]?\s*\n"
+    WRITER_BLOCK_PATTERN = r"## \[(.*?)\]\s*\n"
+    REVIEWER_ANCHOR_PATTERN = r"- \*\*整体结论\*\*:"
 
     def __init__(self, api_key: str = settings.KIMI_API_KEY):
         self.api_key = api_key
-        self.api_url = "https://api.moonshot.cn/v1/chat/completions"
+        self._clients: Dict[int, OpenAI] = {}
 
         current_dir = os.path.dirname(os.path.abspath(__file__))
         prompts_dir = os.path.join(current_dir, "..", "..", "prompts")
@@ -35,27 +38,68 @@ class AIProcessor:
         system_prompt: str,
         user_content: str,
         history: Optional[List[Dict[str, str]]] = None,
+        *,
+        response_format: Optional[Dict[str, str]] = None,
+        longform: bool = False,
+        temperature: float = 0.3,
     ) -> str:
+        if not self.api_key.strip():
+            raise RuntimeError("KIMI_API_KEY is not configured.")
+
         messages = [{"role": "system", "content": system_prompt}]
         if history:
             messages.extend(history)
         messages.append({"role": "user", "content": user_content})
 
-        response = requests.post(
-            self.api_url,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.api_key}",
-            },
-            json={
-                "model": "moonshot-v1-8k",
-                "messages": messages,
-                "temperature": 0.3,
-            },
-            timeout=60,
+        request_timeout = (
+            settings.KIMI_LONGFORM_TIMEOUT_SECONDS if longform else settings.KIMI_TIMEOUT_SECONDS
         )
-        response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"]
+        client = self._get_client(request_timeout)
+        payload: Dict[str, Any] = {
+            "model": settings.KIMI_MODEL,
+            "messages": messages,
+            "temperature": temperature,
+        }
+        if response_format is not None:
+            payload["response_format"] = response_format
+
+        last_error: Optional[Exception] = None
+        for attempt in range(max(1, int(settings.KIMI_MAX_RETRIES or 1))):
+            try:
+                completion = client.chat.completions.create(**payload)
+                content = (completion.choices[0].message.content or "").strip()
+                if not content:
+                    raise ValueError("Kimi returned empty content.")
+                return content
+            except (AuthenticationError, PermissionDeniedError) as exc:
+                raise RuntimeError("Kimi authentication failed. Check KIMI_API_KEY permissions and validity.") from exc
+            except RateLimitError as exc:
+                last_error = exc
+                if attempt >= settings.KIMI_MAX_RETRIES - 1:
+                    raise RuntimeError("Kimi rate limit exceeded after retries.") from exc
+            except (APIConnectionError, APITimeoutError) as exc:
+                last_error = exc
+                if attempt >= settings.KIMI_MAX_RETRIES - 1:
+                    timeout_label = "longform" if longform else "standard"
+                    raise RuntimeError(f"Kimi {timeout_label} request timed out after retries.") from exc
+            except APIError as exc:
+                last_error = exc
+                if attempt >= settings.KIMI_MAX_RETRIES - 1:
+                    raise RuntimeError(f"Kimi request failed after retries: {exc}") from exc
+
+        raise RuntimeError("Kimi request failed without a recoverable response.") from last_error
+
+    def _get_client(self, timeout_seconds: int) -> OpenAI:
+        client = self._clients.get(timeout_seconds)
+        if client is None:
+            client = OpenAI(
+                api_key=self.api_key,
+                base_url=settings.KIMI_BASE_URL,
+                timeout=timeout_seconds,
+                max_retries=0,
+            )
+            self._clients[timeout_seconds] = client
+        return client
 
     def run_editor(self, locked_papers: Sequence[Dict[str, Any]], category: str) -> str:
         input_text = [f"# Locked {category.title()} Batch", "", "系统已锁定以下论文，请逐篇生成定调：", ""]
@@ -71,8 +115,8 @@ class AIProcessor:
                 ]
             )
 
-        output = self._call_llm(self.editor_prompt, "\n".join(input_text))
-        records = self._split_markdown_blocks(output, r"## 论文: \[(.*?)\]", "Editor")
+        output = self._call_llm(self.editor_prompt, "\n".join(input_text), longform=True)
+        records = self._split_markdown_blocks(output, self.EDITOR_BLOCK_PATTERN, "Editor")
         self._validate_exact_id_set(records, locked_papers, "Editor")
 
         for arxiv_id, block in records:
@@ -86,8 +130,9 @@ class AIProcessor:
 
         return output
 
-    def localize_titles(self, papers: Sequence[Dict[str, Any]], batch_size: int = 20) -> Dict[str, str]:
+    def localize_titles(self, papers: Sequence[Dict[str, Any]], batch_size: Optional[int] = None) -> Dict[str, str]:
         localized_titles: Dict[str, str] = {}
+        batch_size = batch_size or max(1, int(settings.KIMI_TITLE_BATCH_SIZE or 1))
 
         for start in range(0, len(papers), batch_size):
             batch = papers[start : start + batch_size]
@@ -112,6 +157,7 @@ class AIProcessor:
                             "Return JSON only, without markdown fences or extra commentary."
                         ),
                         user_content="\n".join(prompt_lines + ([retry_note] if retry_note else [])),
+                        response_format={"type": "json_object"},
                     )
                     batch_titles = self._parse_title_localization_output(raw_output, batch)
                     break
@@ -158,14 +204,19 @@ class AIProcessor:
             self.writer_prompt,
             f"{editor_brief}\n\n---\n\n" + "\n".join(context),
             history=history,
+            longform=True,
         )
-        records = self._split_markdown_blocks(output, r"## \[(.*?)\]", "Writer")
+        records = self._split_markdown_blocks(output, self.WRITER_BLOCK_PATTERN, "Writer")
         self._validate_exact_id_set(records, papers_metadata, "Writer")
         return output
 
     def run_reviewer(self, writer_output: str) -> Dict[str, Any]:
-        output = self._call_llm(self.reviewer_prompt, writer_output).strip()
-        normalized_output = output.replace("\r\n", "\n").strip()
+        output = self._call_llm(self.reviewer_prompt, writer_output, longform=True).strip()
+        normalized_output = self._strip_structured_output_wrappers(
+            output,
+            self.REVIEWER_ANCHOR_PATTERN,
+            allow_preface=True,
+        )
 
         full_match = re.fullmatch(
             r"- \*\*整体结论\*\*: (PASSED|REJECTED)\n- \*\*拒绝名单\*\*: \[(.*?)\]\s*",
@@ -176,7 +227,7 @@ class AIProcessor:
 
         status = full_match.group(1)
         rejected_ids = [item.strip() for item in full_match.group(2).split(",") if item.strip()]
-        writer_ids = {arxiv_id for arxiv_id, _ in self._split_markdown_blocks(writer_output, r"## \[(.*?)\]", "Writer")}
+        writer_ids = {arxiv_id for arxiv_id, _ in self._split_markdown_blocks(writer_output, self.WRITER_BLOCK_PATTERN, "Writer")}
 
         if status == "PASSED" and rejected_ids:
             raise ValueError("Reviewer returned PASSED with a non-empty rejection list.")
@@ -195,7 +246,7 @@ class AIProcessor:
         rejected_ids: Sequence[str],
         category: str,
     ) -> List[Dict[str, Any]]:
-        records = self._split_markdown_blocks(writer_output, r"## \[(.*?)\]", "Writer")
+        records = self._split_markdown_blocks(writer_output, self.WRITER_BLOCK_PATTERN, "Writer")
         rejected_set = set(rejected_ids)
         results: List[Dict[str, Any]] = []
 
@@ -256,7 +307,7 @@ class AIProcessor:
 
     @staticmethod
     def _split_markdown_blocks(output: str, pattern: str, stage_name: str) -> List[Tuple[str, str]]:
-        normalized = output.replace("\r\n", "\n")
+        normalized = AIProcessor._strip_structured_output_wrappers(output, pattern)
         blocks = re.split(pattern, normalized)
 
         if not blocks or blocks[0].strip():
@@ -265,6 +316,22 @@ class AIProcessor:
             raise ValueError(f"{stage_name} output produced malformed block pairs.")
 
         return [(blocks[index].strip(), blocks[index + 1]) for index in range(1, len(blocks), 2)]
+
+    @staticmethod
+    def _strip_structured_output_wrappers(raw_output: str, anchor_pattern: str, allow_preface: bool = False) -> str:
+        normalized = raw_output.replace("\r\n", "\n").strip()
+        stripped_fence = False
+
+        if normalized.startswith("```"):
+            normalized = re.sub(r"^```[a-zA-Z0-9_-]*\s*", "", normalized, count=1).strip()
+            normalized = re.sub(r"\s*```$", "", normalized, count=1).strip()
+            stripped_fence = True
+
+        anchor_match = re.search(anchor_pattern, normalized, re.M)
+        if anchor_match and (stripped_fence or allow_preface):
+            normalized = normalized[anchor_match.start() :].strip()
+
+        return normalized
 
     @staticmethod
     def _validate_exact_id_set(

@@ -34,8 +34,7 @@ class Crawler:
         for paper in hf_papers:
             existing = merged.get(paper["arxiv_id"])
             if existing:
-                existing.update(paper)
-                existing["is_hf_daily"] = True
+                merged[paper["arxiv_id"]] = self._merge_normalized_paper(existing, paper)
             else:
                 paper["is_hf_daily"] = True
                 merged[paper["arxiv_id"]] = paper
@@ -215,3 +214,63 @@ class Crawler:
     @staticmethod
     def _normalize_text(value: Any) -> str:
         return " ".join(str(value or "").replace("\n", " ").split())
+
+    def _merge_normalized_paper(self, arxiv_paper: Dict[str, Any], hf_paper: Dict[str, Any]) -> Dict[str, Any]:
+        merged = dict(arxiv_paper)
+        merged["title_zh"] = arxiv_paper.get("title_zh") or hf_paper.get("title_zh")
+        merged["title_original"] = self._prefer_richer_text(
+            arxiv_paper.get("title_original"),
+            hf_paper.get("title_original"),
+        )
+        merged["authors"] = self._prefer_richer_authors(
+            arxiv_paper.get("authors"),
+            hf_paper.get("authors"),
+        )
+        merged["venue"] = self._prefer_richer_text(arxiv_paper.get("venue"), hf_paper.get("venue")) or None
+        merged["abstract"] = self._prefer_richer_text(arxiv_paper.get("abstract"), hf_paper.get("abstract"))
+        merged["pdf_url"] = self._prefer_pdf_url(arxiv_paper.get("pdf_url"), hf_paper.get("pdf_url"))
+        merged["upvotes"] = max(int(arxiv_paper.get("upvotes", 0) or 0), int(hf_paper.get("upvotes", 0) or 0))
+        merged["arxiv_publish_date"] = arxiv_paper.get("arxiv_publish_date") or hf_paper.get("arxiv_publish_date")
+        merged["is_hf_daily"] = bool(arxiv_paper.get("is_hf_daily") or hf_paper.get("is_hf_daily"))
+        return merged
+
+    @staticmethod
+    def _prefer_richer_text(primary: Optional[str], secondary: Optional[str]) -> str:
+        primary_text = str(primary or "").strip()
+        secondary_text = str(secondary or "").strip()
+        if not primary_text:
+            return secondary_text
+        if not secondary_text:
+            return primary_text
+        return primary_text if len(primary_text) >= len(secondary_text) else secondary_text
+
+    @staticmethod
+    def _prefer_richer_authors(primary: Optional[List[Dict[str, Any]]], secondary: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+        primary_authors = list(primary or [])
+        secondary_authors = list(secondary or [])
+        if not primary_authors:
+            return secondary_authors
+        if not secondary_authors:
+            return primary_authors
+
+        def score(authors: List[Dict[str, Any]]) -> tuple[int, int, int]:
+            non_empty_affiliations = sum(1 for author in authors if str(author.get("affiliation", "")).strip())
+            non_empty_names = sum(1 for author in authors if str(author.get("name", "")).strip())
+            total_chars = sum(len(str(author.get("name", "")).strip()) + len(str(author.get("affiliation", "")).strip()) for author in authors)
+            return (non_empty_affiliations, non_empty_names, total_chars)
+
+        return primary_authors if score(primary_authors) >= score(secondary_authors) else secondary_authors
+
+    @staticmethod
+    def _prefer_pdf_url(primary: Optional[str], secondary: Optional[str]) -> str:
+        primary_url = str(primary or "").strip()
+        secondary_url = str(secondary or "").strip()
+        if primary_url.startswith("https://arxiv.org/pdf/"):
+            return primary_url
+        if secondary_url.startswith("https://arxiv.org/pdf/"):
+            return secondary_url
+        if not primary_url:
+            return secondary_url
+        if not secondary_url:
+            return primary_url
+        return primary_url if len(primary_url) >= len(secondary_url) else secondary_url

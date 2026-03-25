@@ -83,7 +83,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, inject } from 'vue'
+import { ref, watch, inject } from 'vue'
 import { useRoute } from 'vue-router'
 import { Back, Document } from '@element-plus/icons-vue'
 import { getPaperDetail } from '../api/papers'
@@ -132,9 +132,17 @@ const formatCandidateReason = (reason) => {
   return map[reason] || reason
 }
 
-onMounted(() => {
-  fetchDetail(route.params.id)
-})
+watch(
+  () => route.params.id,
+  (paperId) => {
+    if (paperId) {
+      fetchDetail(paperId)
+    } else {
+      paper.value = null
+    }
+  },
+  { immediate: true }
+)
 </script>
 
 <style scoped>

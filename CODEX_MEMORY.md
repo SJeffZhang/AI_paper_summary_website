@@ -794,3 +794,66 @@ When continuing work in this repository, read this file first.
   - 其他: .nexus-map/ 目录、requirements.txt、frontend/test-utils.js 等
 - 新提交: `deca6b2` (`功能：新增测试框架、本地开发脚本与项目文档`)
 - 注意: .gitignore 已排除 .env 文件，API key 不会泄露
+
+## Latest Full-System Review (2026-03-25, current tree vs claimed fixes)
+- User claimed two remaining review findings were fixed around:
+  - `backend/scripts/setup_local_db.py`
+  - `database/migrate_v225.sql`
+- I re-read the latest `Detailed_PRD.md` and re-reviewed the current repository state instead of trusting the textual summary.
+- Actual verification performed:
+  - `cd backend && ./venv/bin/python -m compileall scripts/setup_local_db.py` -> passed
+  - `cd backend && ./venv/bin/pytest ../tests/backend/unit/test_setup_local_db.py` -> passed (`3 passed`)
+  - `cd backend && ./venv/bin/pytest ../tests/backend ../tests/smoke` -> failed (`7 failed, 28 passed`)
+- Important conclusion:
+  - `setup_local_db.py` itself is meaningfully improved:
+    - it now validates a broader schema surface
+    - checks key indexes and the `paper_summary -> paper` FK
+    - detects invalid historical `title_zh`
+    - exposes `--migrate-existing` and `--backfill-title-zh`
+  - but the broader tree currently does **not** match the user’s claim that the remaining issues are fully closed
+- Current blocking / high-signal regressions found in the actual tree:
+  - `backend/app/services/ai_processor.py` has regressed to a legacy raw-requests implementation:
+    - hard-coded `moonshot-v1-8k`
+    - fixed `timeout=60`
+    - missing wrapper-stripping / parser helper surface expected by current tests
+    - this breaks `tests/backend/unit/test_ai_processor.py`
+  - `backend/app/services/crawler.py` still does blind HF merge via `existing.update(paper)` instead of the richer field-aware merge the user described
+  - `backend/app/services/pipeline.py` still performs `localize_titles(scored_papers)` before the Focus/Watching supply baseline audit, so the previously reported cost-ordering issue is still present
+  - `backend/app/api/v1/papers.py` detail route currently passes `score_reasons` twice into `PaperDetail(...)`, causing an integration failure
+  - `Detailed_PRD.md` in the current tree is also still stale in at least two places:
+    - `paper_summary.one_line_summary` / `_en` still shown as `VARCHAR(255)`
+    - LLM timeout still shown as `60s`
+- Testing interpretation rule for future turns:
+  - do not accept “issue closed” claims unless the current tree and the broad backend/smoke suite agree
+  - targeted script tests passing are not sufficient when broader regression tests are red
+
+## Latest Full-System Review (2026-03-25, regression closure pass)
+- Re-read:
+  - `.nexus-map/INDEX.md`
+  - `CODEX_MEMORY.md`
+  - latest `Detailed_PRD.md`
+- Re-reviewed the current tree after the user claimed the red backend points and detail-page no-data issue were fixed.
+- Actual verification performed:
+  - `cd backend && ./venv/bin/pytest ../tests/backend/unit/test_ai_processor.py ../tests/backend/unit/test_crawler.py ../tests/backend/unit/test_pipeline_rules.py ../tests/backend/integration/test_papers_api.py` -> passed (`17 passed`)
+  - `cd backend && ./venv/bin/pytest ../tests/backend ../tests/smoke` -> passed (`35 passed`)
+  - `cd frontend && PATH=/opt/homebrew/bin:$PATH /opt/homebrew/bin/npm run build` -> passed
+- The previously reported regressions are now materially fixed in the current tree:
+  - `backend/app/services/ai_processor.py` is back on the OpenAI-compatible SDK path with:
+    - `settings.KIMI_MODEL`
+    - dual standard/longform timeouts
+    - wrapper stripping
+    - zero-prefix validation
+    - flexible Editor header parsing
+  - `backend/app/services/crawler.py` no longer blindly overwrites richer arXiv metadata with HF fields
+  - `backend/app/services/pipeline.py` now performs Focus/Watching supply audit before title localization
+  - `backend/app/api/v1/papers.py` detail route no longer double-passes `score_reasons`
+  - `frontend/src/views/Detail.vue` now refetches when route `id` changes, which closes the stale page-state issue after in-app navigation
+  - `Detailed_PRD.md` now reflects:
+    - `paper_summary.one_line_summary` / `_en` as `TEXT`
+    - Kimi timeout split as `60s` / `180s`
+- Review conclusion for this pass:
+  - no new substantive P1/P2 finding was identified in the touched surface
+  - current remaining non-blocking observations are:
+    - frontend production build still emits the large-chunk warning (`~1.0 MB` main JS bundle)
+    - backend tests still emit the existing SQLAlchemy `declarative_base()` deprecation warning
+    - `tests/live` was not rerun in this pass, so no new live-chain claim should be inferred from this review
