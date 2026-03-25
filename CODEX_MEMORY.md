@@ -857,3 +857,16 @@ When continuing work in this repository, read this file first.
     - frontend production build still emits the large-chunk warning (`~1.0 MB` main JS bundle)
     - backend tests still emit the existing SQLAlchemy `declarative_base()` deprecation warning
     - `tests/live` was not rerun in this pass, so no new live-chain claim should be inferred from this review
+
+## Latest Git Action (2026-03-25, 回归修复提交)
+- User requested committing and pushing the current working tree after the latest regression-closure pass.
+- Main code commit created:
+  - `1974c5b` (`功能：修复后端回归并完成详情页联调`)
+- Commit contents include:
+  - backend regression closures in `ai_processor.py`, `crawler.py`, `pipeline.py`, `papers.py`, `config.py`, `session.py`
+  - frontend detail-page refresh fix in `frontend/src/views/Detail.vue`
+  - PRD timeout/schema wording sync in `Detailed_PRD.md`
+  - smoke-build test adjustment in `tests/smoke/test_frontend_build.py`
+  - repository file changes: added `dev_memory.md`, removed `issue_2026-02-14_ai_results.md`
+- Follow-up action for this turn:
+  - create a second memory-sync commit and push both commits to `origin/main`
