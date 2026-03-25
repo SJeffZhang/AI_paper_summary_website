@@ -71,7 +71,7 @@
       <br />
       <strong>首页</strong>
       <br />
-      按期号展示 Focus / Watching，并提供候选池与分类入口
+      按期号展示，并提供候选池与分类入口
     </td>
     <td align="center" width="50%">
       <img src="./image/readme-detail.png" alt="详情页预览" width="100%" />
