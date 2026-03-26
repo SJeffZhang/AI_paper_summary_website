@@ -212,6 +212,56 @@ def test_process_category_batch_returns_partial_count_when_backfill_is_exhausted
     assert accepted_summary.one_line_summary == "中文"
 
 
+def test_process_category_batch_splits_large_batches_for_ai_calls():
+    summaries = [
+        SimpleNamespace(
+            category="focus",
+            candidate_reason=None,
+            one_line_summary=None,
+            one_line_summary_en=None,
+            core_highlights=None,
+            core_highlights_en=None,
+            application_scenarios=None,
+            application_scenarios_en=None,
+        )
+        for _ in range(5)
+    ]
+    papers = [{"arxiv_id": f"focus-{index}", "_summary": summary} for index, summary in enumerate(summaries, start=1)]
+
+    pipeline = Pipeline.__new__(Pipeline)
+    calls = []
+
+    def fake_run_ai_batch(batch, category):
+        calls.append([paper["arxiv_id"] for paper in batch])
+        return (
+            [
+                {
+                    "arxiv_id": paper["arxiv_id"],
+                    "one_line_summary": f"中文 {paper['arxiv_id']}",
+                    "one_line_summary_en": f"English {paper['arxiv_id']}",
+                    "core_highlights": ["A1", "A2", "A3"],
+                    "core_highlights_en": ["A1", "A2", "A3"],
+                    "application_scenarios": "场景",
+                    "application_scenarios_en": "Scenario",
+                }
+                for paper in batch
+            ],
+            [],
+        )
+
+    pipeline._run_ai_batch = fake_run_ai_batch
+
+    processed_count = pipeline._process_category_batch(
+        initial_batch=papers,
+        overflow_batch=[],
+        category="focus",
+        target_count=5,
+    )
+
+    assert processed_count == 5
+    assert calls == [["focus-1", "focus-2", "focus-3"], ["focus-4", "focus-5"]]
+
+
 def test_run_ai_batch_persists_editor_writer_and_reviewer_traces(db_session):
     paper = Paper(
         arxiv_id="2503.22001",
@@ -541,8 +591,10 @@ def test_quantity_first_pipeline_uses_full_snapshots_and_standard_ai_batches(db_
     assert task_log.processed_count == 11
     assert localized_batches == [raw_ids]
     assert ai_calls == [
-        ("focus", ["paper-0", "paper-1", "paper-2", "paper-3", "paper-4"]),
-        ("watching", ["paper-5", "paper-6", "paper-7", "paper-8", "paper-9", "paper-10"]),
+        ("focus", ["paper-0", "paper-1", "paper-2"]),
+        ("focus", ["paper-3", "paper-4"]),
+        ("watching", ["paper-5", "paper-6", "paper-7", "paper-8"]),
+        ("watching", ["paper-9", "paper-10"]),
     ]
     assert len(summaries) == 11
     assert sum(1 for summary in summaries if summary.category == "focus") == 5

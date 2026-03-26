@@ -5,6 +5,8 @@ WATCHING_THRESHOLD = 50
 
 FOCUS_CAPACITY = 5
 WATCHING_CAPACITY = 12
+FOCUS_AI_BATCH_SIZE = 3
+WATCHING_AI_BATCH_SIZE = 4
 
 SUMMARY_CATEGORIES = ("focus", "watching", "candidate")
 CANDIDATE_REASONS = ("low_score", "capacity_overflow", "reviewer_rejected")

@@ -10,8 +10,10 @@ from app.services.ai_processor import AIProcessor, StructuredOutputError
 from app.services.crawler import Crawler
 from app.services.scorer import Scorer
 from app.core.specs import (
+    FOCUS_AI_BATCH_SIZE,
     FOCUS_CAPACITY,
     FOCUS_THRESHOLD,
+    WATCHING_AI_BATCH_SIZE,
     WATCHING_CAPACITY,
     WATCHING_THRESHOLD,
 )
@@ -243,10 +245,20 @@ class Pipeline:
     ) -> int:
         accepted_ids = set()
         rejected_blacklist = set()
-        overflow_index = 0
-        pending_batch = list(initial_batch)
+        queued_batch = list(initial_batch) + list(overflow_batch)
+        batch_size = FOCUS_AI_BATCH_SIZE if category == "focus" else WATCHING_AI_BATCH_SIZE
 
-        while pending_batch:
+        while queued_batch and len(accepted_ids) < target_count:
+            pending_batch = []
+            while queued_batch and len(pending_batch) < batch_size and len(accepted_ids) + len(pending_batch) < target_count:
+                candidate = queued_batch.pop(0)
+                if candidate["arxiv_id"] in rejected_blacklist or candidate["arxiv_id"] in accepted_ids:
+                    continue
+                pending_batch.append(candidate)
+
+            if not pending_batch:
+                return len(accepted_ids)
+
             parsed_results, rejected_ids = self._run_ai_batch(pending_batch, category)
             result_map = {result["arxiv_id"]: result for result in parsed_results}
 
@@ -266,22 +278,6 @@ class Pipeline:
                 self._promote_summary(summary, category)
                 self._apply_narrative(summary, result)
                 accepted_ids.add(arxiv_id)
-
-            if len(accepted_ids) >= target_count:
-                return len(accepted_ids)
-
-            needed = target_count - len(accepted_ids)
-            pending_batch = []
-            while overflow_index < len(overflow_batch) and len(pending_batch) < needed:
-                candidate = overflow_batch[overflow_index]
-                overflow_index += 1
-                if candidate["arxiv_id"] in rejected_blacklist or candidate["arxiv_id"] in accepted_ids:
-                    continue
-                self._promote_summary(candidate["_summary"], category)
-                pending_batch.append(candidate)
-
-            if not pending_batch:
-                return len(accepted_ids)
 
         return len(accepted_ids)
 
