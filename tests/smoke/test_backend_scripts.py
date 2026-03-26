@@ -25,6 +25,7 @@ def test_backend_compileall_smoke():
     "script_name",
     [
         "backfill_title_zh.py",
+        "backfill_issue_range.py",
         "run_daily_update_job.py",
         "send_daily_digest.py",
         "install_linux_cron.py",

@@ -12,13 +12,12 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.core.config import settings
-from app.db.session import SessionLocal, rebuild_engine
+from app.db.session import SessionLocal
 from app.models.domain import PaperSummary, SystemTaskLog
 from app.services.pipeline import Pipeline
 from scripts.check_kimi_api import run_checks
 from scripts.run_pipeline_once import _ensure_prompts_exist
 from scripts.setup_local_db import ensure_database_ready
-from scripts.setup_local_mysql import ensure_mysql_server_ready
 
 
 TZ_SHANGHAI = timezone(timedelta(hours=8))
@@ -48,6 +47,17 @@ def _iter_issue_dates(start_date: date, end_date: date):
     while cursor <= end_date:
         yield cursor
         cursor += timedelta(days=1)
+
+
+def _validate_runtime_config() -> None:
+    required_values = {
+        "KIMI_API_KEY": settings.KIMI_API_KEY.strip(),
+        "KIMI_MODEL": settings.KIMI_MODEL.strip(),
+        "KIMI_BASE_URL": settings.KIMI_BASE_URL.strip(),
+    }
+    missing = [key for key, value in required_values.items() if not value]
+    if missing:
+        raise RuntimeError("Missing required Kimi runtime settings: " + ", ".join(missing))
 
 
 def _summarize_issue_date(issue_date: date) -> tuple[str, int, int, dict[str, int], str | None]:
@@ -82,10 +92,8 @@ def backfill_issue_range(start_date: date, end_date: date) -> dict[str, object]:
         raise ValueError("end_date must be greater than or equal to start_date")
 
     _ensure_prompts_exist()
-    mysql_status = ensure_mysql_server_ready()
-    settings.MYSQL_UNIX_SOCKET = ""
-    rebuild_engine()
     database_status = ensure_database_ready()
+    _validate_runtime_config()
     kimi_status = run_checks()
 
     results: list[BackfillResult] = []
@@ -156,7 +164,6 @@ def backfill_issue_range(start_date: date, end_date: date) -> dict[str, object]:
             failed += 1
 
     return {
-        "mysql": mysql_status,
         "database": database_status,
         "kimi": kimi_status,
         "start_date": start_date.isoformat(),

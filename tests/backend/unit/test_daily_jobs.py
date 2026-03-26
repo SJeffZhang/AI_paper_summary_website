@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts import backfill_issue_range as backfill_script
 from app.models.domain import NotificationDeliveryLog, Subscriber, SystemTaskLog
 from app.services import mailer as mailer_service
 from scripts.install_linux_cron import build_cron_block, merge_managed_block
@@ -133,3 +134,40 @@ def test_send_daily_digest_skips_without_successful_issue(session_factory, seede
 
     assert result["status"] == "skipped"
     assert result["reason"] == "missing_successful_issue"
+
+
+def test_backfill_issue_range_uses_standard_pipeline_without_mysql_bootstrap(monkeypatch, session_factory):
+    executed_issue_dates = []
+
+    monkeypatch.setattr(backfill_script, "SessionLocal", session_factory)
+    monkeypatch.setattr(backfill_script, "_ensure_prompts_exist", lambda: None)
+    monkeypatch.setattr(backfill_script, "ensure_database_ready", lambda: {"database_ready": True})
+    monkeypatch.setattr(backfill_script, "_validate_runtime_config", lambda: None)
+    monkeypatch.setattr(backfill_script, "run_checks", lambda: {"kimi_ready": True})
+
+    class RecordingPipeline:
+        def __init__(self, db):
+            self.db = db
+
+        def run(self, issue_date: str):
+            issue_date_value = date.fromisoformat(issue_date)
+            executed_issue_dates.append(issue_date_value)
+            self.db.add(
+                SystemTaskLog(
+                    issue_date=issue_date_value,
+                    status="SUCCESS",
+                    fetched_count=9,
+                    processed_count=5,
+                )
+            )
+            self.db.commit()
+
+    monkeypatch.setattr(backfill_script, "Pipeline", RecordingPipeline)
+
+    result = backfill_script.backfill_issue_range(date(2026, 3, 25), date(2026, 3, 26))
+
+    assert result["database"] == {"database_ready": True}
+    assert result["kimi"] == {"kimi_ready": True}
+    assert result["new_success"] == 2
+    assert result["failed"] == 0
+    assert executed_issue_dates == [date(2026, 3, 25), date(2026, 3, 26)]

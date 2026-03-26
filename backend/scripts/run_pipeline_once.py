@@ -12,14 +12,13 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.core.config import settings
 from app.core.specs import FOCUS_CAPACITY, FOCUS_THRESHOLD, WATCHING_CAPACITY, WATCHING_THRESHOLD
-from app.db.session import SessionLocal, rebuild_engine
+from app.db.session import SessionLocal
 from app.models.domain import PaperSummary, SystemTaskLog
 from app.services.crawler import Crawler
 from app.services.pipeline import Pipeline
 from app.services.scorer import Scorer
 from scripts.check_kimi_api import run_checks
 from scripts.setup_local_db import ensure_database_ready
-from scripts.setup_local_mysql import ensure_mysql_server_ready
 
 
 PROMPT_FILES = [
@@ -33,6 +32,17 @@ def _ensure_prompts_exist() -> None:
     missing = [str(path) for path in PROMPT_FILES if not path.exists()]
     if missing:
         raise FileNotFoundError(f"Missing prompt files: {missing}")
+
+
+def _validate_runtime_config() -> None:
+    required_values = {
+        "KIMI_API_KEY": settings.KIMI_API_KEY.strip(),
+        "KIMI_MODEL": settings.KIMI_MODEL.strip(),
+        "KIMI_BASE_URL": settings.KIMI_BASE_URL.strip(),
+    }
+    missing = [key for key, value in required_values.items() if not value]
+    if missing:
+        raise RuntimeError("Missing required Kimi runtime settings: " + ", ".join(missing))
 
 
 def _probe_issue_date() -> dict[str, object]:
@@ -132,14 +142,10 @@ def _probe_issue_date() -> dict[str, object]:
 def run_pipeline_once() -> dict[str, object]:
     print("[run] validating prompt files", flush=True)
     _ensure_prompts_exist()
-    print("[run] ensuring local MySQL is ready", flush=True)
-    mysql_status = ensure_mysql_server_ready()
-    if mysql_status.get("connection_mode") != "tcp":
-        raise RuntimeError("System MySQL bootstrap succeeded, but the application is not using TCP localhost:3306.")
-    settings.MYSQL_UNIX_SOCKET = ""
-    rebuild_engine()
     print("[run] ensuring database schema is ready", flush=True)
     db_status = ensure_database_ready()
+    print("[run] validating Kimi runtime settings", flush=True)
+    _validate_runtime_config()
     print("[run] checking Kimi connectivity", flush=True)
     kimi_status = run_checks()
     fixed_issue_date = os.environ.get("PIPELINE_FIXED_ISSUE_DATE", "").strip()
@@ -186,7 +192,6 @@ def run_pipeline_once() -> dict[str, object]:
             raise RuntimeError("Pipeline finished without creating a system_task_log row.")
 
         return {
-            "mysql": mysql_status,
             "database": db_status,
             "kimi": kimi_status,
             "selected_issue_date": probe["issue_date"],
