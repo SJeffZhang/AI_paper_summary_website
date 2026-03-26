@@ -3,9 +3,25 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app.models.domain import Subscriber
+from app.services.mailer import MailDeliveryError
 
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.fixture(autouse=True)
+def stub_subscription_emails(monkeypatch):
+    sent_messages = []
+
+    monkeypatch.setattr(
+        "app.api.v1.subscribe.notification_service.send_subscription_verification_email",
+        lambda email, token: sent_messages.append(("verify", email, token)),
+    )
+    monkeypatch.setattr(
+        "app.api.v1.subscribe.notification_service.send_subscription_management_email",
+        lambda email, token: sent_messages.append(("manage", email, token)),
+    )
+    return sent_messages
 
 
 def test_subscribe_creates_pending_subscriber(api_client, session_factory):
@@ -72,3 +88,22 @@ def test_unsubscribe_write_endpoint_is_rate_limited(api_client):
 
     assert blocked.status_code == 429
     assert blocked.json()["msg"] == "请求过于频繁，请一小时后再试。"
+
+
+def test_subscribe_returns_503_when_mail_delivery_fails(api_client, session_factory, monkeypatch):
+    def _raise_failure(_email, _token):
+        raise MailDeliveryError("smtp down")
+
+    monkeypatch.setattr(
+        "app.api.v1.subscribe.notification_service.send_subscription_verification_email",
+        _raise_failure,
+    )
+
+    response = api_client.post("/api/v1/subscribe", json={"email": "broken@example.com"})
+
+    assert response.status_code == 503
+    assert "邮件发送失败" in response.json()["msg"]
+
+    with session_factory() as session:
+        subscriber = session.query(Subscriber).filter(Subscriber.email == "broken@example.com").first()
+        assert subscriber is None

@@ -21,8 +21,17 @@ def test_backend_compileall_smoke():
     assert result.returncode == 0, result.stderr or result.stdout
 
 
-def test_backfill_script_import_smoke():
-    script_path = BACKEND_DIR / "scripts" / "backfill_title_zh.py"
+@pytest.mark.parametrize(
+    "script_name",
+    [
+        "backfill_title_zh.py",
+        "run_daily_update_job.py",
+        "send_daily_digest.py",
+        "install_linux_cron.py",
+    ],
+)
+def test_backend_script_import_smoke(script_name):
+    script_path = BACKEND_DIR / "scripts" / script_name
     spec = importlib.util.spec_from_file_location("backfill_title_zh", script_path)
 
     assert spec is not None and spec.loader is not None

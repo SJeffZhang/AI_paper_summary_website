@@ -103,6 +103,29 @@ def test_find_schema_mismatches_accepts_current_v225_sentinels():
             "started_at": {"type": "datetime", "null": "NO", "key": "", "default": "current_timestamp", "extra": ""},
             "finished_at": {"type": "datetime", "null": "YES", "key": "", "default": None, "extra": ""},
         },
+        "notification_delivery_log": {
+            "id": {"type": "int", "null": "NO", "key": "PRI", "default": None, "extra": "auto_increment"},
+            "notification_type": {
+                "type": "enum('daily_digest','job_alert')",
+                "null": "NO",
+                "key": "MUL",
+                "default": None,
+                "extra": "",
+            },
+            "run_date": {"type": "date", "null": "NO", "key": "MUL", "default": None, "extra": ""},
+            "issue_date": {"type": "date", "null": "YES", "key": "MUL", "default": None, "extra": ""},
+            "recipient_email": {"type": "varchar(255)", "null": "NO", "key": "", "default": None, "extra": ""},
+            "status": {
+                "type": "enum('sent','failed','skipped')",
+                "null": "NO",
+                "key": "MUL",
+                "default": None,
+                "extra": "",
+            },
+            "subject": {"type": "varchar(255)", "null": "NO", "key": "", "default": None, "extra": ""},
+            "error_log": {"type": "text", "null": "YES", "key": "", "default": None, "extra": ""},
+            "sent_at": {"type": "datetime", "null": "NO", "key": "", "default": "current_timestamp", "extra": ""},
+        },
     }
     index_snapshot = {
         "paper": {"PRIMARY", "uk_arxiv_id", "idx_publish_date"},
@@ -110,6 +133,14 @@ def test_find_schema_mismatches_accepts_current_v225_sentinels():
         "paper_ai_trace": {"PRIMARY", "uk_trace_summary_stage_attempt", "idx_trace_summary_id", "idx_trace_stage"},
         "subscriber": {"PRIMARY", "uk_email", "uk_verify_token", "uk_unsub_token", "idx_status"},
         "system_task_log": {"PRIMARY", "uk_issue_date"},
+        "notification_delivery_log": {
+            "PRIMARY",
+            "uk_notification_type_run_recipient",
+            "idx_notification_type",
+            "idx_notification_run_date",
+            "idx_notification_issue_date",
+            "idx_notification_status",
+        },
     }
     foreign_key_snapshot = {
         "paper_summary": {"fk_paper_summary_paper_id"},
@@ -153,6 +184,7 @@ def test_find_schema_mismatches_flags_old_schema_shapes():
     assert any("paper_summary.candidate_reason" in mismatch for mismatch in mismatches)
     assert any("paper_summary.one_line_summary" in mismatch for mismatch in mismatches)
     assert any("missing table `paper_ai_trace`" in mismatch for mismatch in mismatches)
+    assert any("missing table `notification_delivery_log`" in mismatch for mismatch in mismatches)
     assert any("subscriber.unsub_token" in mismatch for mismatch in mismatches)
     assert any("system_task_log.error_log" in mismatch for mismatch in mismatches)
     assert any("paper_summary.uk_paper_issue" in mismatch for mismatch in mismatches)

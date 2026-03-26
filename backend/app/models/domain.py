@@ -2,7 +2,15 @@ from sqlalchemy import Column, Date, DateTime, Enum, ForeignKey, Integer, JSON, 
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
-from app.core.specs import AI_TRACE_STAGES, AI_TRACE_STATUSES, CANDIDATE_REASONS, DIRECTIONS, SUMMARY_CATEGORIES
+from app.core.specs import (
+    AI_TRACE_STAGES,
+    AI_TRACE_STATUSES,
+    CANDIDATE_REASONS,
+    DIRECTIONS,
+    NOTIFICATION_DELIVERY_STATUSES,
+    NOTIFICATION_TYPES,
+    SUMMARY_CATEGORIES,
+)
 from app.models.base import Base
 
 
@@ -97,3 +105,30 @@ class SystemTaskLog(Base):
     error_log = Column(Text, nullable=True)
     started_at = Column(DateTime, server_default=func.now(), nullable=False)
     finished_at = Column(DateTime, nullable=True)
+
+
+class NotificationDeliveryLog(Base):
+    __tablename__ = "notification_delivery_log"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    notification_type = Column(Enum(*NOTIFICATION_TYPES, name="notification_type"), index=True, nullable=False)
+    run_date = Column(Date, index=True, nullable=False)
+    issue_date = Column(Date, index=True, nullable=True)
+    recipient_email = Column(String(255), nullable=False)
+    status = Column(
+        Enum(*NOTIFICATION_DELIVERY_STATUSES, name="notification_delivery_status"),
+        index=True,
+        nullable=False,
+    )
+    subject = Column(String(255), nullable=False)
+    error_log = Column(Text, nullable=True)
+    sent_at = Column(DateTime, server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "notification_type",
+            "run_date",
+            "recipient_email",
+            name="uk_notification_type_run_recipient",
+        ),
+    )

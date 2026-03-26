@@ -201,4 +201,22 @@ ALTER TABLE `subscriber`
   DROP INDEX `uk_unsubscribe_token`,
   ADD UNIQUE KEY `uk_unsub_token` (`unsub_token`);
 
+CREATE TABLE IF NOT EXISTS `notification_delivery_log` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `notification_type` ENUM('daily_digest', 'job_alert') NOT NULL,
+  `run_date` DATE NOT NULL,
+  `issue_date` DATE DEFAULT NULL,
+  `recipient_email` VARCHAR(255) NOT NULL,
+  `status` ENUM('sent', 'failed', 'skipped') NOT NULL,
+  `subject` VARCHAR(255) NOT NULL,
+  `error_log` TEXT DEFAULT NULL,
+  `sent_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_notification_type_run_recipient` (`notification_type`, `run_date`, `recipient_email`),
+  KEY `idx_notification_type` (`notification_type`),
+  KEY `idx_notification_run_date` (`run_date`),
+  KEY `idx_notification_issue_date` (`issue_date`),
+  KEY `idx_notification_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;

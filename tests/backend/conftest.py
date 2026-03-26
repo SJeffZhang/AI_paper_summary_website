@@ -10,7 +10,7 @@ from app.api.v1.subscribe import rate_limit_store
 from app.db.session import get_db
 from app.main import app
 from app.models.base import Base
-from app.models.domain import Paper, PaperAITrace, PaperSummary
+from app.models.domain import NotificationDeliveryLog, Paper, PaperAITrace, PaperSummary, Subscriber, SystemTaskLog
 
 
 @pytest.fixture(autouse=True)

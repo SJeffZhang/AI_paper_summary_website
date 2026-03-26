@@ -256,9 +256,18 @@ pip install -r requirements-test.txt
 
 #### 2. 配置 `backend/.env`
 
+推荐先复制 [backend/.env.example](/Users/zhangshijie/Desktop/Project/AI_paper_summary_website/backend/.env.example) 再改成你的实际值：
+
+```bash
+cd backend
+cp .env.example .env
+```
+
 ```env
 PROJECT_NAME="AI Paper Summary API"
 DATABASE_URL="mysql+pymysql://root:password@localhost:3306/ai_paper_summary"
+BACKEND_PUBLIC_URL="http://127.0.0.1:8000"
+FRONTEND_URL="http://127.0.0.1:5173"
 KIMI_API_KEY="your-kimi-api-key"
 KIMI_BASE_URL="https://api.moonshot.cn/v1"
 KIMI_MODEL="kimi-k2.5"
@@ -268,8 +277,16 @@ KIMI_MAX_RETRIES=3
 KIMI_TITLE_BATCH_SIZE=8
 PIPELINE_PROBE_DAYS=14
 MYSQL_UNIX_SOCKET=""
+SMTP_HOST="smtp.example.com"
+SMTP_PORT=587
+SMTP_USERNAME="your-smtp-username"
+SMTP_PASSWORD="your-smtp-password"
+SMTP_FROM_EMAIL="no-reply@example.com"
+SMTP_FROM_NAME="AI Paper Summary"
+SMTP_USE_STARTTLS=true
+SMTP_USE_SSL=false
+OWNER_ALERT_EMAIL="z1332556430@gmail.com"
 HUGGINGFACE_API_URL="https://huggingface.co/api/daily_papers"
-FRONTEND_URL="http://127.0.0.1:5173"
 ```
 
 #### 3. 初始化 MySQL 和数据库
@@ -348,7 +365,37 @@ npm run build
 
 ## 9. 运行脚本
 
-### 9.1 运行一次完整流水线
+### 9.1 Linux 定时更新脚本
+
+每天 `08:00` 的正式更新入口：
+
+```bash
+cd backend
+./venv/bin/python scripts/run_daily_update_job.py
+```
+
+每天 `08:30` 的日报发送入口：
+
+```bash
+cd backend
+./venv/bin/python scripts/send_daily_digest.py
+```
+
+Linux `cron` 安装脚本：
+
+```bash
+cd backend
+./venv/bin/python scripts/install_linux_cron.py --print-only
+./venv/bin/python scripts/install_linux_cron.py
+```
+
+说明：
+
+- `run_daily_update_job.py` 会按上海时区计算当日 `issue_date`，失败时给 `OWNER_ALERT_EMAIL` 发告警邮件
+- `send_daily_digest.py` 只会在当日期号 `SUCCESS` 后向有效订阅用户发送日报
+- `install_linux_cron.py` 会在当前用户 crontab 中写入 `08:00` 更新和 `08:30` 发报两条定时任务
+
+### 9.2 运行一次完整流水线
 
 ```bash
 cd backend
@@ -361,14 +408,14 @@ cd backend
 - 再在最近 `PIPELINE_PROBE_DAYS` 天内自动探测可跑的 `issue_date`
 - 然后执行一次完整的 `Pipeline.run(...)`
 
-### 9.2 指定某个期号跑批
+### 9.3 指定某个期号跑批
 
 ```bash
 cd backend
 PIPELINE_FIXED_ISSUE_DATE=2026-03-25 ./venv/bin/python scripts/run_pipeline_once.py
 ```
 
-### 9.3 历史区间回填
+### 9.4 历史区间回填
 
 ```bash
 cd backend
@@ -380,7 +427,7 @@ cd backend
 - 历史回填当前和日常发布共用同一条 `Pipeline.run(...)` 主链
 - 会按期号逐天执行，并在 `system_task_log` 中留下结果
 
-### 9.4 历史中文标题回填
+### 9.5 历史中文标题回填
 
 ```bash
 cd backend

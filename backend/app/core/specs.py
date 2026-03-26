@@ -11,6 +11,8 @@ CANDIDATE_REASONS = ("low_score", "capacity_overflow", "reviewer_rejected")
 TASK_STATUSES = ("RUNNING", "SUCCESS", "FAILED")
 AI_TRACE_STAGES = ("editor", "writer", "reviewer")
 AI_TRACE_STATUSES = ("generated", "accepted", "rejected", "invalid")
+NOTIFICATION_TYPES = ("daily_digest", "job_alert")
+NOTIFICATION_DELIVERY_STATUSES = ("sent", "failed", "skipped")
 
 DIRECTIONS = (
     "Agent",

@@ -89,6 +89,17 @@ EXPECTED_COLUMN_RULES = {
         "started_at": {"type": "datetime", "null": "NO"},
         "finished_at": {"type": "datetime", "null": "YES"},
     },
+    "notification_delivery_log": {
+        "id": {"type": "int", "null": "NO", "extra_contains": "auto_increment"},
+        "notification_type": {"type": "enum('daily_digest','job_alert')", "null": "NO"},
+        "run_date": {"type": "date", "null": "NO"},
+        "issue_date": {"type": "date", "null": "YES"},
+        "recipient_email": {"type": "varchar(255)", "null": "NO"},
+        "status": {"type": "enum('sent','failed','skipped')", "null": "NO"},
+        "subject": {"type": "varchar(255)", "null": "NO"},
+        "error_log": {"type": "text", "null": "YES"},
+        "sent_at": {"type": "datetime", "null": "NO"},
+    },
 }
 EXPECTED_INDEXES = {
     "paper": {"PRIMARY", "uk_arxiv_id", "idx_publish_date"},
@@ -96,6 +107,14 @@ EXPECTED_INDEXES = {
     "paper_ai_trace": {"PRIMARY", "uk_trace_summary_stage_attempt", "idx_trace_summary_id", "idx_trace_stage"},
     "subscriber": {"PRIMARY", "uk_email", "uk_verify_token", "uk_unsub_token", "idx_status"},
     "system_task_log": {"PRIMARY", "uk_issue_date"},
+    "notification_delivery_log": {
+        "PRIMARY",
+        "uk_notification_type_run_recipient",
+        "idx_notification_type",
+        "idx_notification_run_date",
+        "idx_notification_issue_date",
+        "idx_notification_status",
+    },
 }
 EXPECTED_FOREIGN_KEYS = {
     "paper_summary": {"fk_paper_summary_paper_id"},
