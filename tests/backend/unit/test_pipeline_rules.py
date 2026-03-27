@@ -118,6 +118,7 @@ def test_process_category_batch_backfills_after_rejection():
 
     pipeline = Pipeline.__new__(Pipeline)
     calls = []
+    pipeline._ensure_localized_title = lambda paper: None
 
     def fake_run_ai_batch(papers, category):
         calls.append([paper["arxiv_id"] for paper in papers])
@@ -134,8 +135,10 @@ def test_process_category_batch_backfills_after_rejection():
                         "application_scenarios_en": "Scenario A",
                     }
                 ],
-                ["focus-b"],
+                [],
             )
+        if len(calls) == 2:
+            return ([], ["focus-b"])
         return (
             [
                 {
@@ -161,7 +164,7 @@ def test_process_category_batch_backfills_after_rejection():
     )
 
     assert processed_count == 2
-    assert calls == [["focus-a", "focus-b"], ["focus-c"]]
+    assert calls == [["focus-a"], ["focus-b"], ["focus-c"]]
     assert accepted_summary.category == "focus"
     assert accepted_summary.one_line_summary == "中文 A"
     assert rejected_summary.category == "candidate"
@@ -185,6 +188,7 @@ def test_process_category_batch_returns_partial_count_when_backfill_is_exhausted
     )
 
     pipeline = Pipeline.__new__(Pipeline)
+    pipeline._ensure_localized_title = lambda paper: None
     pipeline._run_ai_batch = lambda papers, category: (
         [
             {
@@ -212,7 +216,7 @@ def test_process_category_batch_returns_partial_count_when_backfill_is_exhausted
     assert accepted_summary.one_line_summary == "中文"
 
 
-def test_process_category_batch_splits_large_batches_for_ai_calls():
+def test_process_category_batch_processes_each_paper_in_isolation():
     summaries = [
         SimpleNamespace(
             category="focus",
@@ -229,6 +233,7 @@ def test_process_category_batch_splits_large_batches_for_ai_calls():
     papers = [{"arxiv_id": f"focus-{index}", "_summary": summary} for index, summary in enumerate(summaries, start=1)]
 
     pipeline = Pipeline.__new__(Pipeline)
+    pipeline._ensure_localized_title = lambda paper: None
     calls = []
 
     def fake_run_ai_batch(batch, category):
@@ -259,7 +264,7 @@ def test_process_category_batch_splits_large_batches_for_ai_calls():
     )
 
     assert processed_count == 5
-    assert calls == [["focus-1", "focus-2", "focus-3"], ["focus-4", "focus-5"]]
+    assert calls == [["focus-1"], ["focus-2"], ["focus-3"], ["focus-4"], ["focus-5"]]
 
 
 def test_run_ai_batch_persists_editor_writer_and_reviewer_traces(db_session):
@@ -465,11 +470,10 @@ def test_run_uses_quantity_first_fallback_when_supply_is_insufficient(db_session
         "direction": "Agent",
     }
 
-    localized_batches = []
+    localized_ids = []
     ai_calls = []
-    pipeline.ai_processor.localize_titles = lambda papers: (
-        localized_batches.append([paper["arxiv_id"] for paper in papers]) or
-        {paper["arxiv_id"]: f"中文标题 {paper['arxiv_id']}" for paper in papers}
+    pipeline.ai_processor.localize_title = lambda paper: (
+        localized_ids.append(paper["arxiv_id"]) or f"中文标题 {paper['arxiv_id']}"
     )
     pipeline._run_ai_batch = lambda papers, category: (
         ai_calls.append((category, [paper["arxiv_id"] for paper in papers])) or
@@ -503,8 +507,8 @@ def test_run_uses_quantity_first_fallback_when_supply_is_insufficient(db_session
         .all()
     )
 
-    assert localized_batches == [["paper-focus", "paper-watch"]]
-    assert ai_calls == [("focus", ["paper-focus", "paper-watch"])]
+    assert localized_ids == ["paper-focus", "paper-watch"]
+    assert ai_calls == [("focus", ["paper-focus"]), ("focus", ["paper-watch"])]
     assert task_log.status == "SUCCESS"
     assert task_log.processed_count == 2
     assert len(summaries) == 2
@@ -545,12 +549,12 @@ def test_quantity_first_pipeline_uses_full_snapshots_and_standard_ai_batches(db_
         "direction": "Agent",
     }
 
-    localized_batches = []
+    localized_ids = []
     ai_calls = []
 
-    def fake_localize_titles(papers):
-        localized_batches.append([paper["arxiv_id"] for paper in papers])
-        return {paper["arxiv_id"]: f"中文标题 {paper['arxiv_id']}" for paper in papers}
+    def fake_localize_title(paper):
+        localized_ids.append(paper["arxiv_id"])
+        return f"中文标题 {paper['arxiv_id']}"
 
     def fake_run_ai_batch(papers, category):
         ai_calls.append((category, [paper["arxiv_id"] for paper in papers]))
@@ -570,7 +574,7 @@ def test_quantity_first_pipeline_uses_full_snapshots_and_standard_ai_batches(db_
             [],
         )
 
-    pipeline.ai_processor.localize_titles = fake_localize_titles
+    pipeline.ai_processor.localize_title = fake_localize_title
     pipeline._run_ai_batch = fake_run_ai_batch
 
     pipeline.run("2026-03-23")
@@ -589,12 +593,19 @@ def test_quantity_first_pipeline_uses_full_snapshots_and_standard_ai_batches(db_
 
     assert task_log.status == "SUCCESS"
     assert task_log.processed_count == 11
-    assert localized_batches == [raw_ids]
+    assert localized_ids == raw_ids
     assert ai_calls == [
-        ("focus", ["paper-0", "paper-1", "paper-2"]),
-        ("focus", ["paper-3", "paper-4"]),
-        ("watching", ["paper-5", "paper-6", "paper-7", "paper-8"]),
-        ("watching", ["paper-9", "paper-10"]),
+        ("focus", ["paper-0"]),
+        ("focus", ["paper-1"]),
+        ("focus", ["paper-2"]),
+        ("focus", ["paper-3"]),
+        ("focus", ["paper-4"]),
+        ("watching", ["paper-5"]),
+        ("watching", ["paper-6"]),
+        ("watching", ["paper-7"]),
+        ("watching", ["paper-8"]),
+        ("watching", ["paper-9"]),
+        ("watching", ["paper-10"]),
     ]
     assert len(summaries) == 11
     assert sum(1 for summary in summaries if summary.category == "focus") == 5

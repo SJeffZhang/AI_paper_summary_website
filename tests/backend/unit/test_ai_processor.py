@@ -16,6 +16,25 @@ def test_parse_title_localization_output_requires_chinese_and_different_title():
     assert parsed == {"2503.00001": "面向生产推理的智能体 RAG"}
 
 
+def test_localize_titles_falls_back_per_paper_when_llm_keeps_failing(monkeypatch):
+    processor = AIProcessor(api_key="test-key")
+    papers = [
+        {"arxiv_id": "2503.00001", "title_original": "Reliable Agent Planning"},
+        {"arxiv_id": "2503.00002", "title_original": "Vision Model with 中文"},
+    ]
+
+    monkeypatch.setattr(
+        processor,
+        "_call_llm",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("kimi timeout")),
+    )
+
+    localized = processor.localize_titles(papers)
+
+    assert localized["2503.00001"] == "待翻译：Reliable Agent Planning"
+    assert localized["2503.00002"] == "Vision Model with 中文"
+
+
 def test_split_markdown_blocks_enforces_zero_prefix():
     with pytest.raises(ValueError, match="zero-prefix"):
         AIProcessor._split_markdown_blocks(
@@ -189,4 +208,3 @@ def test_parse_final_summaries_validates_highlight_symmetry():
 
     with pytest.raises(ValueError, match="asymmetric"):
         AIProcessor(api_key="test-key").parse_final_summaries(writer_output, [], "focus")
-

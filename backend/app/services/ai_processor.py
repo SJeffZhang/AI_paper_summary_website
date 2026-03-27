@@ -129,23 +129,39 @@ class AIProcessor:
             raise StructuredOutputError(str(exc), raw_output=output) from exc
         return output
 
+    @classmethod
+    def build_fallback_title(cls, title_original: str) -> str:
+        normalized = str(title_original or "").strip()
+        if not normalized:
+            return "待翻译标题"
+        if cls.CJK_PATTERN.search(normalized):
+            return normalized
+        return f"待翻译：{normalized}"
+
+    def localize_title(self, paper: Dict[str, Any]) -> str:
+        return self.localize_titles([paper])[paper["arxiv_id"]]
+
     def localize_titles(self, papers: Sequence[Dict[str, Any]], batch_size: Optional[int] = None) -> Dict[str, str]:
         localized_titles: Dict[str, str] = {}
-        batch_size = batch_size or max(1, int(settings.KIMI_TITLE_BATCH_SIZE or 1))
+        for paper in papers:
+            arxiv_id = paper["arxiv_id"]
+            current_title = str(paper.get("title_zh") or "").strip()
+            original_title = str(paper["title_original"] or "").strip()
 
-        for start in range(0, len(papers), batch_size):
-            batch = papers[start : start + batch_size]
+            if current_title and self.CJK_PATTERN.search(current_title) and current_title.casefold() != original_title.casefold():
+                localized_titles[arxiv_id] = current_title
+                continue
+
             prompt_lines = [
                 "请把以下英文论文标题翻译成简洁、自然、面向中文技术读者的中文标题。",
                 "保留模型名、数据集名、框架名、缩写和关键专有名词，不要添加编号或解释。",
                 "每个中文标题都必须至少包含一个中文汉字，不能直接返回英文原题。",
                 "只返回 JSON 对象，key 是 arxiv_id，value 是中文标题。",
                 "",
+                f"- {arxiv_id}: {original_title}",
             ]
-            for paper in batch:
-                prompt_lines.append(f"- {paper['arxiv_id']}: {paper['title_original']}")
 
-            batch_titles = None
+            localized_title = None
             retry_note = ""
             for attempt in range(3):
                 try:
@@ -158,20 +174,19 @@ class AIProcessor:
                         user_content="\n".join(prompt_lines + ([retry_note] if retry_note else [])),
                         response_format={"type": "json_object"},
                     )
-                    batch_titles = self._parse_title_localization_output(raw_output, batch)
+                    localized_title = self._parse_title_localization_output(raw_output, [paper])[arxiv_id]
                     break
                 except Exception as exc:
                     if attempt >= 2:
-                        raise
+                        localized_title = self.build_fallback_title(original_title)
+                        break
                     retry_note = (
                         "上一次输出没有通过校验。"
                         f"错误原因：{exc}。"
-                        "请重新返回 JSON，并确保每个标题都是真正的中文本地化标题。"
+                        "请重新返回 JSON，并确保标题是真正的中文本地化标题。"
                     )
 
-            if batch_titles is None:
-                raise ValueError("Title localization failed after retries.")
-            localized_titles.update(batch_titles)
+            localized_titles[arxiv_id] = localized_title or self.build_fallback_title(original_title)
 
         return localized_titles
 

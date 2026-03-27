@@ -10,10 +10,8 @@ from app.services.ai_processor import AIProcessor, StructuredOutputError
 from app.services.crawler import Crawler
 from app.services.scorer import Scorer
 from app.core.specs import (
-    FOCUS_AI_BATCH_SIZE,
     FOCUS_CAPACITY,
     FOCUS_THRESHOLD,
-    WATCHING_AI_BATCH_SIZE,
     WATCHING_CAPACITY,
     WATCHING_THRESHOLD,
 )
@@ -62,9 +60,8 @@ class Pipeline:
 
             snapshot_papers = scored_papers
 
-            localized_titles = self.ai_processor.localize_titles(snapshot_papers)
             for paper in snapshot_papers:
-                paper["title_zh"] = localized_titles[paper["arxiv_id"]]
+                paper["title_zh"] = self.ai_processor.build_fallback_title(paper["title_original"])
 
             paper_map = self._upsert_papers(snapshot_papers)
             self._reset_issue_snapshots(issue_date)
@@ -88,6 +85,9 @@ class Pipeline:
                 category="watching",
                 target_count=len(watching_selected),
             )
+
+            if processed_count == 0:
+                raise ValueError(f"No papers passed AI processing for {issue_date.isoformat()}.")
 
             task_log.fetched_count = fetched_count
             task_log.processed_count = processed_count
@@ -246,40 +246,46 @@ class Pipeline:
         accepted_ids = set()
         rejected_blacklist = set()
         queued_batch = list(initial_batch) + list(overflow_batch)
-        batch_size = FOCUS_AI_BATCH_SIZE if category == "focus" else WATCHING_AI_BATCH_SIZE
 
         while queued_batch and len(accepted_ids) < target_count:
-            pending_batch = []
-            while queued_batch and len(pending_batch) < batch_size and len(accepted_ids) + len(pending_batch) < target_count:
-                candidate = queued_batch.pop(0)
-                if candidate["arxiv_id"] in rejected_blacklist or candidate["arxiv_id"] in accepted_ids:
-                    continue
-                pending_batch.append(candidate)
+            paper = queued_batch.pop(0)
+            arxiv_id = paper["arxiv_id"]
+            if arxiv_id in rejected_blacklist or arxiv_id in accepted_ids:
+                continue
 
-            if not pending_batch:
-                return len(accepted_ids)
+            summary = paper["_summary"]
+            try:
+                self._ensure_localized_title(paper)
+                parsed_results, rejected_ids = self._run_ai_batch([paper], category)
+            except Exception:
+                rejected_blacklist.add(arxiv_id)
+                self._demote_summary(summary)
+                continue
 
-            parsed_results, rejected_ids = self._run_ai_batch(pending_batch, category)
-            result_map = {result["arxiv_id"]: result for result in parsed_results}
+            if arxiv_id in rejected_ids:
+                rejected_blacklist.add(arxiv_id)
+                self._demote_summary(summary)
+                continue
 
-            for paper in pending_batch:
-                summary = paper["_summary"]
-                arxiv_id = paper["arxiv_id"]
+            if not parsed_results:
+                rejected_blacklist.add(arxiv_id)
+                self._demote_summary(summary)
+                continue
 
-                if arxiv_id in rejected_ids:
-                    rejected_blacklist.add(arxiv_id)
-                    self._demote_summary(summary)
-                    continue
-
-                result = result_map.get(arxiv_id)
-                if result is None:
-                    raise ValueError(f"Missing parsed summary for {arxiv_id} in {category} batch.")
-
-                self._promote_summary(summary, category)
-                self._apply_narrative(summary, result)
-                accepted_ids.add(arxiv_id)
+            result = parsed_results[0]
+            self._promote_summary(summary, category)
+            self._apply_narrative(summary, result)
+            accepted_ids.add(arxiv_id)
 
         return len(accepted_ids)
+
+    def _ensure_localized_title(self, paper: Dict[str, Any]) -> None:
+        localized_title = self.ai_processor.localize_title(paper)
+        paper["title_zh"] = localized_title
+        db_paper = paper.get("_paper")
+        if db_paper is not None:
+            db_paper.title_zh = localized_title
+            self.db.flush()
 
     def _run_ai_batch(
         self,
