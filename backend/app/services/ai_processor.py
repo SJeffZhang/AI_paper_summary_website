@@ -50,6 +50,7 @@ class AIProcessor:
         response_format: Optional[Dict[str, str]] = None,
         longform: bool = False,
         temperature: Optional[float] = 1.0,
+        max_tokens: Optional[int] = None,
     ) -> str:
         if not self.api_key.strip():
             raise RuntimeError("KIMI_API_KEY is not configured.")
@@ -71,6 +72,8 @@ class AIProcessor:
             payload["temperature"] = temperature
         if response_format is not None:
             payload["response_format"] = response_format
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
 
         last_error: Optional[Exception] = None
         for attempt in range(max(1, int(settings.KIMI_MAX_RETRIES or 1))):
@@ -140,12 +143,17 @@ class AIProcessor:
                     f"- 中文标题: {paper['title_zh']}",
                     f"- 分数: {paper['score']}",
                     f"- 方向: {paper['direction']}",
-                    f"- 摘要: {paper['abstract']}",
+                    f"- 摘要: {self._truncate_abstract(paper['abstract'])}",
                     "",
                 ]
             )
 
-        output = self._call_llm(self.editor_prompt, "\n".join(input_text), longform=True)
+        output = self._call_llm(
+            self.editor_prompt,
+            "\n".join(input_text),
+            longform=True,
+            max_tokens=max(320, 320 * len(locked_papers)),
+        )
         try:
             self.parse_editor_records(output, locked_papers)
         except Exception as exc:
@@ -196,6 +204,7 @@ class AIProcessor:
                         ),
                         user_content="\n".join(prompt_lines + ([retry_note] if retry_note else [])),
                         response_format={"type": "json_object"},
+                        max_tokens=120,
                     )
                     localized_title = self._parse_title_localization_output(raw_output, [paper])[arxiv_id]
                     break
@@ -232,7 +241,7 @@ class AIProcessor:
                     f"- 中文标题: {paper['title_zh']}",
                     f"- 方向: {paper['direction']}",
                     f"- Venue: {paper.get('venue') or 'N/A'}",
-                    f"- Abstract: {paper['abstract']}",
+                    f"- Abstract: {self._truncate_abstract(paper['abstract'])}",
                     "",
                 ]
             )
@@ -242,6 +251,7 @@ class AIProcessor:
             f"{editor_brief}\n\n---\n\n" + "\n".join(context),
             history=history,
             longform=True,
+            max_tokens=max(480, (720 if category == "focus" else 420) * len(selected_ids)),
         )
         try:
             self.parse_writer_records(output, papers_metadata, category)
@@ -250,7 +260,12 @@ class AIProcessor:
         return output
 
     def run_reviewer(self, writer_output: str) -> Dict[str, Any]:
-        output = self._call_llm(self.reviewer_prompt, writer_output, longform=True).strip()
+        output = self._call_llm(
+            self.reviewer_prompt,
+            writer_output,
+            longform=True,
+            max_tokens=120,
+        ).strip()
         try:
             normalized_output = self._strip_structured_output_wrappers(
                 output,
@@ -449,6 +464,13 @@ class AIProcessor:
     @staticmethod
     def _extract_markdown_bullets(block: str) -> List[str]:
         return [item.strip() for item in re.findall(r"^\s*-\s+(.*?)\s*$", block, re.M) if item.strip()]
+
+    @staticmethod
+    def _truncate_abstract(abstract: str, limit: int = 1600) -> str:
+        normalized = " ".join(str(abstract or "").split())
+        if len(normalized) <= limit:
+            return normalized
+        return normalized[: limit - 1].rstrip() + "…"
 
     @staticmethod
     def _parse_title_localization_output(raw_output: str, papers: Sequence[Dict[str, Any]]) -> Dict[str, str]:
