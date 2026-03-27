@@ -77,6 +77,26 @@ def test_extract_message_content_supports_segment_lists():
     assert AIProcessor._extract_message_content(message) == "第一段\n第二段"
 
 
+def test_collect_streamed_content_joins_delta_text():
+    stream = [
+        SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="第一段 "))]),
+        SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    delta=SimpleNamespace(
+                        content=[
+                            SimpleNamespace(type="text", text="第二段"),
+                            {"type": "text", "text": "第三段"},
+                        ]
+                    )
+                )
+            ]
+        ),
+    ]
+
+    assert AIProcessor._collect_streamed_content(stream) == "第一段 第二段第三段"
+
+
 def test_split_markdown_blocks_supports_bracketless_editor_headers():
     records = AIProcessor._split_markdown_blocks(
         "## 论文: 2503.00001\n- **写作角度**: demo\n- **核心痛点**: demo\n- **具体解法**: demo\n",
@@ -307,3 +327,23 @@ def test_call_llm_retries_empty_content(monkeypatch):
 
     assert processor._call_llm("system", "user") == "ok"
     assert calls["count"] == 2
+
+
+def test_call_llm_uses_streaming_for_longform(monkeypatch):
+    processor = AIProcessor(api_key="test-key")
+
+    class FakeClient:
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**kwargs):
+                    assert kwargs["stream"] is True
+                    return [
+                        SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="hello "))]),
+                        SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="world"))]),
+                    ]
+
+    monkeypatch.setattr(processor, "_get_client", lambda timeout_seconds: FakeClient())
+    monkeypatch.setattr(processor, "_respect_request_interval", lambda longform: None)
+
+    assert processor._call_llm("system", "user", longform=True) == "hello world"

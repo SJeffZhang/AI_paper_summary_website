@@ -80,8 +80,11 @@ class AIProcessor:
         for attempt in range(max(1, int(settings.KIMI_MAX_RETRIES or 1))):
             try:
                 self._respect_request_interval(longform)
-                completion = client.chat.completions.create(**payload)
-                content = self._extract_message_content(completion.choices[0].message)
+                if self._should_stream(longform=longform, response_format=response_format):
+                    content = self._collect_streamed_content(client.chat.completions.create(stream=True, **payload))
+                else:
+                    completion = client.chat.completions.create(**payload)
+                    content = self._extract_message_content(completion.choices[0].message)
                 if not content:
                     last_error = ValueError("Kimi returned empty content.")
                     if attempt >= settings.KIMI_MAX_RETRIES - 1:
@@ -121,6 +124,10 @@ class AIProcessor:
             )
             self._clients[timeout_seconds] = client
         return client
+
+    @staticmethod
+    def _should_stream(longform: bool, response_format: Optional[Dict[str, str]]) -> bool:
+        return longform and response_format is None
 
     @staticmethod
     def _retry_backoff_seconds(attempt: int, longform: bool) -> int:
@@ -494,6 +501,40 @@ class AIProcessor:
             text = getattr(content, "text", None)
             return str(text).strip() if text else ""
         return ""
+
+    @staticmethod
+    def _extract_stream_delta_content(delta: Any) -> str:
+        content = getattr(delta, "content", None)
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: List[str] = []
+            for item in content:
+                if isinstance(item, dict):
+                    if item.get("type") == "text" and item.get("text"):
+                        parts.append(str(item["text"]))
+                else:
+                    item_type = getattr(item, "type", None)
+                    item_text = getattr(item, "text", None)
+                    if item_type == "text" and item_text:
+                        parts.append(str(item_text))
+            return "".join(parts)
+        return ""
+
+    @classmethod
+    def _collect_streamed_content(cls, stream: Any) -> str:
+        parts: List[str] = []
+        for chunk in stream:
+            choices = getattr(chunk, "choices", None) or []
+            if not choices:
+                continue
+            delta = getattr(choices[0], "delta", None)
+            if delta is None:
+                continue
+            text = cls._extract_stream_delta_content(delta)
+            if text:
+                parts.append(text)
+        return "".join(parts).strip()
 
     @staticmethod
     def _normalize_record_id(raw_id: str) -> str:
