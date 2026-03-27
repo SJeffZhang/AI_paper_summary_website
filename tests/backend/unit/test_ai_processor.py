@@ -568,3 +568,25 @@ def test_call_llm_uses_non_streaming_for_longform(monkeypatch):
     monkeypatch.setattr(processor, "_respect_request_interval", lambda longform: None)
 
     assert processor._call_llm("system", "user", longform=True) == "hello world"
+
+
+def test_call_llm_normalizes_temperature_for_kimi_k25(monkeypatch):
+    processor = AIProcessor(api_key="test-key")
+    captured = {}
+
+    class FakeClient:
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**kwargs):
+                    captured["kwargs"] = kwargs
+                    return SimpleNamespace(
+                        choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))]
+                    )
+
+    monkeypatch.setattr(settings, "KIMI_MODEL", "kimi-k2.5")
+    monkeypatch.setattr(processor, "_get_client", lambda timeout_seconds: FakeClient())
+    monkeypatch.setattr(processor, "_respect_request_interval", lambda longform: None)
+
+    assert processor._call_llm("system", "user", temperature=0.0) == "ok"
+    assert captured["kwargs"]["temperature"] == 1.0

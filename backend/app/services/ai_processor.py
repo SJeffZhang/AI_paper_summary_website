@@ -69,8 +69,9 @@ class AIProcessor:
             "model": settings.KIMI_MODEL,
             "messages": messages,
         }
-        if temperature is not None:
-            payload["temperature"] = temperature
+        normalized_temperature = self._normalize_temperature_for_model(settings.KIMI_MODEL, temperature)
+        if normalized_temperature is not None:
+            payload["temperature"] = normalized_temperature
         if response_format is not None:
             payload["response_format"] = response_format
         if max_tokens is not None:
@@ -157,6 +158,14 @@ class AIProcessor:
         else:
             configured = settings.KIMI_MIN_REQUEST_INTERVAL_SECONDS
         return max(0.0, float(configured))
+
+    @staticmethod
+    def _normalize_temperature_for_model(model_name: str, temperature: Optional[float]) -> Optional[float]:
+        if temperature is None:
+            return None
+        if str(model_name or "").strip().lower() == "kimi-k2.5":
+            return 1.0
+        return temperature
 
     @staticmethod
     def _max_retry_attempts(longform: bool) -> int:
