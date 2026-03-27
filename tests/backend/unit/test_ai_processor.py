@@ -172,6 +172,39 @@ def test_run_writer_accepts_prefixed_editor_headers(monkeypatch):
     assert "## [2503.00001]" in output
 
 
+def test_run_editor_uses_large_longform_token_budget(monkeypatch):
+    processor = AIProcessor(api_key="test-key")
+    captured = {}
+
+    def fake_call_llm(system_prompt, user_content, history=None, **kwargs):
+        captured["kwargs"] = kwargs
+        return (
+            "## 论文: [2503.00001]\n"
+            "- **写作角度**: demo\n"
+            "- **核心痛点**: demo\n"
+            "- **具体解法**: demo\n"
+        )
+
+    monkeypatch.setattr(processor, "_call_llm", fake_call_llm)
+
+    processor.run_editor(
+        [
+            {
+                "arxiv_id": "2503.00001",
+                "title_zh": "中文标题",
+                "title_original": "Original Title",
+                "score": 88,
+                "direction": "Agent",
+                "abstract": "demo abstract",
+            }
+        ],
+        "focus",
+    )
+
+    assert captured["kwargs"]["longform"] is True
+    assert captured["kwargs"]["max_tokens"] >= 4096
+
+
 def test_run_writer_accepts_bracketless_editor_headers(monkeypatch):
     processor = AIProcessor(api_key="test-key")
     editor_brief = (
@@ -209,6 +242,33 @@ def test_run_writer_accepts_bracketless_editor_headers(monkeypatch):
 
     output = processor.run_writer(editor_brief, papers_metadata, "focus")
     assert "## [2503.00001]" in output
+
+
+def test_run_reviewer_uses_large_longform_token_budget(monkeypatch):
+    processor = AIProcessor(api_key="test-key")
+    captured = {}
+
+    def fake_call_llm(system_prompt, user_content, history=None, **kwargs):
+        captured["kwargs"] = kwargs
+        return "- **整体结论**: PASSED\n- **拒绝名单**: []"
+
+    monkeypatch.setattr(processor, "_call_llm", fake_call_llm)
+
+    result = processor.run_reviewer(
+        "## [2503.00001]\n"
+        "- **一句话总结**: 中文总结\n"
+        "- **One-line Summary**: English summary\n"
+        "- **核心亮点**:\n"
+        "- 亮点一\n- 亮点二\n- 亮点三\n"
+        "- **Core Highlights**:\n"
+        "- Point 1\n- Point 2\n- Point 3\n"
+        "- **应用场景**: 中文场景\n"
+        "- **Application Scenarios**: English scenario\n"
+    )
+
+    assert result["status"] == "PASSED"
+    assert captured["kwargs"]["longform"] is True
+    assert captured["kwargs"]["max_tokens"] >= 2048
 
 
 def test_parse_writer_records_returns_trace_content_and_summary_fields():

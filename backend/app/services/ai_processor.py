@@ -164,7 +164,7 @@ class AIProcessor:
             self.editor_prompt,
             "\n".join(input_text),
             longform=True,
-            max_tokens=max(320, 320 * len(locked_papers)),
+            max_tokens=max(4096, 1200 * len(locked_papers)),
         )
         try:
             self.parse_editor_records(output, locked_papers)
@@ -263,7 +263,7 @@ class AIProcessor:
             f"{editor_brief}\n\n---\n\n" + "\n".join(context),
             history=history,
             longform=True,
-            max_tokens=max(480, (720 if category == "focus" else 420) * len(selected_ids)),
+            max_tokens=max(4096, (1800 if category == "focus" else 1200) * len(selected_ids)),
         )
         try:
             self.parse_writer_records(output, papers_metadata, category)
@@ -276,7 +276,7 @@ class AIProcessor:
             self.reviewer_prompt,
             writer_output,
             longform=True,
-            max_tokens=120,
+            max_tokens=2048,
         ).strip()
         try:
             normalized_output = self._strip_structured_output_wrappers(
