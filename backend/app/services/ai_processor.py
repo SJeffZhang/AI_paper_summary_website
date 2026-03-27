@@ -151,8 +151,12 @@ class AIProcessor:
         self._next_request_at = time.monotonic() + interval_seconds
 
     @staticmethod
-    def _minimum_request_interval_seconds(longform: bool) -> int:
-        return 20 if longform else 5
+    def _minimum_request_interval_seconds(longform: bool) -> float:
+        if longform:
+            configured = settings.KIMI_LONGFORM_MIN_REQUEST_INTERVAL_SECONDS
+        else:
+            configured = settings.KIMI_MIN_REQUEST_INTERVAL_SECONDS
+        return max(0.0, float(configured))
 
     @staticmethod
     def _max_retry_attempts(longform: bool) -> int:
