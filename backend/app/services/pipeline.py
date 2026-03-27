@@ -650,13 +650,18 @@ class Pipeline:
     ) -> None:
         if not content:
             return
+        trace_attempt_no = attempt_no
+        if stage_status == "invalid":
+            # Keep invalid raw output without colliding with generated traces
+            # under the unique key (paper_summary_id, stage, attempt_no).
+            trace_attempt_no = attempt_no * 10 + 1
         for paper in papers:
             self.db.add(
                 PaperAITrace(
                     paper_summary_id=paper["_summary"].id,
                     stage=stage,
                     stage_status=stage_status,
-                    attempt_no=attempt_no,
+                    attempt_no=trace_attempt_no,
                     content=content,
                 )
             )

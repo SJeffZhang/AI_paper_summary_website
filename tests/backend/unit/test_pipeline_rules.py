@@ -371,6 +371,33 @@ def test_max_category_attempts_respects_target_multiplier_and_global_cap(monkeyp
     assert Pipeline._max_category_attempts("focus", target_count=8, queued_count=10) == 10
 
 
+def test_record_uniform_stage_traces_offsets_invalid_attempt_number():
+    collected = []
+
+    class FakeDB:
+        @staticmethod
+        def add(obj):
+            collected.append(obj)
+
+        @staticmethod
+        def flush():
+            return None
+
+    pipeline = Pipeline.__new__(Pipeline)
+    pipeline.db = FakeDB()
+
+    pipeline._record_uniform_stage_traces(
+        papers=[{"_summary": SimpleNamespace(id=123)}],
+        stage="writer",
+        stage_status="invalid",
+        attempt_no=2,
+        content="invalid output",
+    )
+
+    assert len(collected) == 1
+    assert collected[0].attempt_no == 21
+
+
 def test_refresh_selected_titles_updates_focus_and_watching_fallbacks(db_session):
     issue_date = Pipeline._resolve_issue_date("2026-03-27")
     paper = Paper(
@@ -590,11 +617,11 @@ def test_run_ai_batch_persists_invalid_attempt_traces(db_session):
     assert rejected_ids == []
     assert results[0]["one_line_summary"] == "中文总结 writer-output-3"
     assert [(trace.stage, trace.attempt_no, trace.stage_status) for trace in traces] == [
-        ("editor", 1, "invalid"),
+        ("editor", 11, "invalid"),
         ("editor", 2, "generated"),
-        ("writer", 1, "invalid"),
+        ("writer", 11, "invalid"),
         ("writer", 2, "generated"),
-        ("reviewer", 2, "invalid"),
+        ("reviewer", 21, "invalid"),
         ("writer", 3, "generated"),
         ("reviewer", 3, "accepted"),
     ]
