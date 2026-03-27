@@ -161,6 +161,15 @@ def test_extract_message_content_supports_segment_lists():
     assert AIProcessor._extract_message_content(message) == "第一段\n第二段"
 
 
+def test_extract_message_content_falls_back_to_reasoning_content():
+    message = SimpleNamespace(
+        content="",
+        reasoning_content="备用正文",
+    )
+
+    assert AIProcessor._extract_message_content(message) == "备用正文"
+
+
 def test_collect_streamed_content_joins_delta_text():
     stream = [
         SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="第一段 "))]),

@@ -624,7 +624,9 @@ class AIProcessor:
     def _extract_message_content(message: Any) -> str:
         content = getattr(message, "content", None)
         if isinstance(content, str):
-            return content.strip()
+            normalized = content.strip()
+            if normalized:
+                return normalized
         if isinstance(content, list):
             parts: List[str] = []
             for item in content:
@@ -636,10 +638,32 @@ class AIProcessor:
                     item_text = getattr(item, "text", None)
                     if item_type == "text" and item_text:
                         parts.append(str(item_text).strip())
-            return "\n".join(part for part in parts if part).strip()
+            normalized = "\n".join(part for part in parts if part).strip()
+            if normalized:
+                return normalized
         if isinstance(content, SimpleNamespace):
             text = getattr(content, "text", None)
-            return str(text).strip() if text else ""
+            normalized = str(text).strip() if text else ""
+            if normalized:
+                return normalized
+
+        # Moonshot/Kimi may occasionally return empty `content` while placing
+        # the effective text payload in `reasoning_content`.
+        reasoning_content = getattr(message, "reasoning_content", None)
+        if isinstance(reasoning_content, str):
+            return reasoning_content.strip()
+        if isinstance(reasoning_content, list):
+            parts: List[str] = []
+            for item in reasoning_content:
+                if isinstance(item, dict):
+                    if item.get("type") == "text" and item.get("text"):
+                        parts.append(str(item["text"]).strip())
+                else:
+                    item_text = getattr(item, "text", None)
+                    if item_text:
+                        parts.append(str(item_text).strip())
+            return "\n".join(part for part in parts if part).strip()
+
         return ""
 
     @staticmethod
