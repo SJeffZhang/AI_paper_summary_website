@@ -500,6 +500,26 @@ class Pipeline:
                     return parsed_results, []
 
                 last_rejected_ids = rejected_ids
+                if not settings.PIPELINE_REVIEWER_STRICT:
+                    print(
+                        (
+                            f"[pipeline][{category}] reviewer rejected IDs "
+                            f"{','.join(rejected_ids) or '-'}; accepting writer output in non-strict mode."
+                        ),
+                        flush=True,
+                    )
+                    return [
+                        {
+                            "arxiv_id": record["arxiv_id"],
+                            "one_line_summary": record["one_line_summary"],
+                            "one_line_summary_en": record["one_line_summary_en"],
+                            "core_highlights": record["core_highlights"],
+                            "core_highlights_en": record["core_highlights_en"],
+                            "application_scenarios": record["application_scenarios"],
+                            "application_scenarios_en": record["application_scenarios_en"],
+                        }
+                        for record in writer_records
+                    ], []
                 if attempt >= max_retries:
                     return parsed_results, rejected_ids
 
@@ -550,6 +570,26 @@ class Pipeline:
                         return parsed_results, []
 
                     last_rejected_ids = rejected_ids
+                    if not settings.PIPELINE_REVIEWER_STRICT:
+                        print(
+                            (
+                                f"[pipeline][{category}] reviewer rejected IDs "
+                                f"{','.join(rejected_ids) or '-'}; accepting writer output in non-strict mode."
+                            ),
+                            flush=True,
+                        )
+                        return [
+                            {
+                                "arxiv_id": record["arxiv_id"],
+                                "one_line_summary": record["one_line_summary"],
+                                "one_line_summary_en": record["one_line_summary_en"],
+                                "core_highlights": record["core_highlights"],
+                                "core_highlights_en": record["core_highlights_en"],
+                                "application_scenarios": record["application_scenarios"],
+                                "application_scenarios_en": record["application_scenarios_en"],
+                            }
+                            for record in writer_records
+                        ], []
                     if attempt >= max_retries:
                         return parsed_results, rejected_ids
 

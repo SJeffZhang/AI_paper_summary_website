@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     PIPELINE_FOCUS_ATTEMPT_MULTIPLIER: int = 4
     PIPELINE_WATCHING_ATTEMPT_MULTIPLIER: int = 2
     PIPELINE_ENABLE_WATCHING: bool = True
+    PIPELINE_REVIEWER_STRICT: bool = True
     PIPELINE_PROBE_DAYS: int = 14
     MYSQL_UNIX_SOCKET: str = ""
     SMTP_HOST: str = ""
