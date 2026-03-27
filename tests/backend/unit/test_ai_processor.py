@@ -35,6 +35,13 @@ def test_localize_titles_falls_back_per_paper_when_llm_keeps_failing(monkeypatch
     assert localized["2503.00002"] == "Vision Model with 中文"
 
 
+def test_retry_backoff_seconds_scales_for_standard_and_longform_requests():
+    assert AIProcessor._retry_backoff_seconds(0, longform=False) == 5
+    assert AIProcessor._retry_backoff_seconds(2, longform=False) == 15
+    assert AIProcessor._retry_backoff_seconds(0, longform=True) == 15
+    assert AIProcessor._retry_backoff_seconds(4, longform=True) == 60
+
+
 def test_split_markdown_blocks_enforces_zero_prefix():
     with pytest.raises(ValueError, match="zero-prefix"):
         AIProcessor._split_markdown_blocks(

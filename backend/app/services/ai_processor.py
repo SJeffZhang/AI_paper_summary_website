@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import time
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from openai import APIConnectionError, APIError, APITimeoutError, AuthenticationError, OpenAI, PermissionDeniedError, RateLimitError
@@ -84,15 +85,18 @@ class AIProcessor:
                 last_error = exc
                 if attempt >= settings.KIMI_MAX_RETRIES - 1:
                     raise RuntimeError("Kimi rate limit exceeded after retries.") from exc
+                time.sleep(self._retry_backoff_seconds(attempt, longform))
             except (APIConnectionError, APITimeoutError) as exc:
                 last_error = exc
                 if attempt >= settings.KIMI_MAX_RETRIES - 1:
                     timeout_label = "longform" if longform else "standard"
                     raise RuntimeError(f"Kimi {timeout_label} request timed out after retries.") from exc
+                time.sleep(self._retry_backoff_seconds(attempt, longform))
             except APIError as exc:
                 last_error = exc
                 if attempt >= settings.KIMI_MAX_RETRIES - 1:
                     raise RuntimeError(f"Kimi request failed after retries: {exc}") from exc
+                time.sleep(self._retry_backoff_seconds(attempt, longform))
 
         raise RuntimeError("Kimi request failed without a recoverable response.") from last_error
 
@@ -107,6 +111,12 @@ class AIProcessor:
             )
             self._clients[timeout_seconds] = client
         return client
+
+    @staticmethod
+    def _retry_backoff_seconds(attempt: int, longform: bool) -> int:
+        base_seconds = 15 if longform else 5
+        max_seconds = 60 if longform else 20
+        return min(base_seconds * (attempt + 1), max_seconds)
 
     def run_editor(self, locked_papers: Sequence[Dict[str, Any]], category: str) -> str:
         input_text = [f"# Locked {category.title()} Batch", "", "系统已锁定以下论文，请逐篇生成定调：", ""]
