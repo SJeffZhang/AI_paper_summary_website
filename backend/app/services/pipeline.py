@@ -289,6 +289,11 @@ class Pipeline:
         while queued_batch and len(accepted_ids) < target_count and attempted_count < max_attempts:
             paper = queued_batch.pop(0)
             arxiv_id = paper["arxiv_id"]
+            summary = paper["_summary"]
+            # A paper may be promoted from watching -> focus in the previous category stage.
+            # Skip it when iterating the watching stage to avoid duplicate AI trace writes.
+            if category != "focus" and summary.category == "focus":
+                continue
             if arxiv_id in rejected_blacklist or arxiv_id in accepted_ids:
                 continue
 
@@ -300,7 +305,6 @@ class Pipeline:
                 )
             )
 
-            summary = paper["_summary"]
             try:
                 self._ensure_localized_title(paper)
                 parsed_results, rejected_ids = self._run_ai_batch([paper], category)

@@ -218,6 +218,27 @@ def test_process_category_batch_returns_partial_count_when_backfill_is_exhausted
     assert accepted_summary.one_line_summary == "中文"
 
 
+def test_process_category_batch_skips_watching_items_promoted_to_focus():
+    promoted_summary = SimpleNamespace(category="focus")
+
+    pipeline = Pipeline.__new__(Pipeline)
+    pipeline._ensure_localized_title = lambda paper: (_ for _ in ()).throw(
+        AssertionError("localized_title should not be called for promoted focus rows")
+    )
+    run_calls = []
+    pipeline._run_ai_batch = lambda papers, category: (run_calls.append((category, papers)), ([], []))
+
+    processed_count = pipeline._process_category_batch(
+        initial_batch=[{"arxiv_id": "promoted-paper", "_summary": promoted_summary}],
+        overflow_batch=[],
+        category="watching",
+        target_count=1,
+    )
+
+    assert processed_count == 0
+    assert run_calls == []
+
+
 def test_process_category_batch_processes_each_paper_in_isolation():
     summaries = [
         SimpleNamespace(
