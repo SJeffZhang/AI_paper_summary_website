@@ -170,6 +170,14 @@ def test_extract_message_content_falls_back_to_reasoning_content():
     assert AIProcessor._extract_message_content(message) == "备用正文"
 
 
+def test_extract_message_content_strips_think_prefix():
+    message = SimpleNamespace(
+        content="<think>internal</think>\n\n## [2503.00001]\n- **一句话总结**: ok",
+    )
+
+    assert AIProcessor._extract_message_content(message).startswith("## [2503.00001]")
+
+
 def test_collect_streamed_content_joins_delta_text():
     stream = [
         SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="第一段 "))]),

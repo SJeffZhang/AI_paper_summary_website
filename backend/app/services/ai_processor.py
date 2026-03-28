@@ -631,9 +631,12 @@ class AIProcessor:
 
     @staticmethod
     def _extract_message_content(message: Any) -> str:
+        def normalize_text(value: str) -> str:
+            return AIProcessor._strip_reasoning_prefix(value)
+
         content = getattr(message, "content", None)
         if isinstance(content, str):
-            normalized = content.strip()
+            normalized = normalize_text(content)
             if normalized:
                 return normalized
         if isinstance(content, list):
@@ -646,13 +649,13 @@ class AIProcessor:
                     item_type = getattr(item, "type", None)
                     item_text = getattr(item, "text", None)
                     if item_type == "text" and item_text:
-                        parts.append(str(item_text).strip())
-            normalized = "\n".join(part for part in parts if part).strip()
+                        parts.append(normalize_text(str(item_text)))
+            normalized = normalize_text("\n".join(part for part in parts if part))
             if normalized:
                 return normalized
         if isinstance(content, SimpleNamespace):
             text = getattr(content, "text", None)
-            normalized = str(text).strip() if text else ""
+            normalized = normalize_text(str(text)) if text else ""
             if normalized:
                 return normalized
 
@@ -660,20 +663,29 @@ class AIProcessor:
         # the effective text payload in `reasoning_content`.
         reasoning_content = getattr(message, "reasoning_content", None)
         if isinstance(reasoning_content, str):
-            return reasoning_content.strip()
+            return normalize_text(reasoning_content)
         if isinstance(reasoning_content, list):
             parts: List[str] = []
             for item in reasoning_content:
                 if isinstance(item, dict):
                     if item.get("type") == "text" and item.get("text"):
-                        parts.append(str(item["text"]).strip())
+                        parts.append(normalize_text(str(item["text"])))
                 else:
                     item_text = getattr(item, "text", None)
                     if item_text:
-                        parts.append(str(item_text).strip())
-            return "\n".join(part for part in parts if part).strip()
+                        parts.append(normalize_text(str(item_text)))
+            return normalize_text("\n".join(part for part in parts if part))
 
         return ""
+
+    @staticmethod
+    def _strip_reasoning_prefix(text: str) -> str:
+        normalized = str(text or "").strip()
+        if not normalized:
+            return ""
+        # MiniMax models may prepend internal reasoning blocks.
+        normalized = re.sub(r"<think>[\s\S]*?</think>\s*", "", normalized, flags=re.IGNORECASE)
+        return normalized.strip()
 
     @staticmethod
     def _extract_stream_delta_content(delta: Any) -> str:
