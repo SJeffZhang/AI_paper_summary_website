@@ -5,6 +5,7 @@ WATCHING_THRESHOLD = 50
 
 FOCUS_CAPACITY = 5
 WATCHING_CAPACITY = 12
+DAILY_SNAPSHOT_CAPACITY = 50
 
 SUMMARY_CATEGORIES = ("focus", "watching", "candidate")
 CANDIDATE_REASONS = ("low_score", "capacity_overflow", "reviewer_rejected")

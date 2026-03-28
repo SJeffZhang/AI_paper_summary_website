@@ -11,6 +11,7 @@ from app.services.crawler import Crawler
 from app.services.scorer import Scorer
 from app.core.config import settings
 from app.core.specs import (
+    DAILY_SNAPSHOT_CAPACITY,
     FOCUS_CAPACITY,
     FOCUS_THRESHOLD,
     WATCHING_CAPACITY,
@@ -66,6 +67,15 @@ class Pipeline:
             )
             if not scored_papers:
                 raise ValueError(f"No papers fetched for {issue_date.isoformat()}.")
+
+            if len(scored_papers) > DAILY_SNAPSHOT_CAPACITY:
+                _safe_progress_log(
+                    (
+                        f"[pipeline] truncating scored snapshot: "
+                        f"total={len(scored_papers)} keep_top={DAILY_SNAPSHOT_CAPACITY}"
+                    )
+                )
+                scored_papers = scored_papers[:DAILY_SNAPSHOT_CAPACITY]
 
             (
                 focus_pool,

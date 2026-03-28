@@ -888,3 +888,71 @@ def test_quantity_first_pipeline_uses_full_snapshots_and_standard_ai_batches(db_
     assert len(summaries) == 11
     assert sum(1 for summary in summaries if summary.category == "focus") == 5
     assert sum(1 for summary in summaries if summary.category == "watching") == 6
+
+
+def test_run_truncates_daily_snapshot_to_top_50(db_session):
+    pipeline = Pipeline(db_session)
+    raw_ids = [f"paper-{index:02d}" for index in range(60)]
+    score_map = {paper_id: 200 - index for index, paper_id in enumerate(raw_ids)}
+
+    pipeline.crawler.fetch_papers = lambda fetch_date: [{"arxiv_id": paper_id} for paper_id in raw_ids]
+    pipeline.scorer.score_paper = lambda paper: {
+        "arxiv_id": paper["arxiv_id"],
+        "title_original": f"Original {paper['arxiv_id']}",
+        "authors": [{"name": "Author", "affiliation": "OpenAI"}],
+        "venue": "ICLR 2026",
+        "abstract": f"Abstract {paper['arxiv_id']}",
+        "pdf_url": f"https://arxiv.org/pdf/{paper['arxiv_id']}.pdf",
+        "upvotes": 0,
+        "arxiv_publish_date": "2026-03-20",
+        "score": score_map[paper["arxiv_id"]],
+        "score_reasons": {},
+        "direction": "Agent",
+    }
+
+    pipeline.ai_processor.localize_title = lambda paper: f"中文标题 {paper['arxiv_id']}"
+    pipeline.ai_processor.localize_titles = lambda papers, batch_size=None: {
+        paper["arxiv_id"]: f"候选中文标题 {paper['arxiv_id']}" for paper in papers
+    }
+    pipeline._run_ai_batch = lambda papers, category: (
+        [
+            {
+                "arxiv_id": paper["arxiv_id"],
+                "one_line_summary": f"中文总结 {paper['arxiv_id']}",
+                "one_line_summary_en": f"English summary {paper['arxiv_id']}",
+                "core_highlights": ["亮点一", "亮点二", "亮点三"],
+                "core_highlights_en": ["Point 1", "Point 2", "Point 3"],
+                "application_scenarios": f"场景 {paper['arxiv_id']}",
+                "application_scenarios_en": f"Scenario {paper['arxiv_id']}",
+            }
+            for paper in papers
+        ],
+        [],
+    )
+
+    pipeline.run("2026-03-23")
+
+    issue_date = Pipeline._resolve_issue_date("2026-03-23")
+    task_log = (
+        db_session.query(SystemTaskLog)
+        .filter(SystemTaskLog.issue_date == issue_date)
+        .one()
+    )
+    summaries = (
+        db_session.query(PaperSummary, Paper.arxiv_id)
+        .join(Paper, Paper.id == PaperSummary.paper_id)
+        .filter(PaperSummary.issue_date == issue_date)
+        .all()
+    )
+
+    snapshot_ids = {arxiv_id for _, arxiv_id in summaries}
+    expected_ids = set(raw_ids[:50])
+
+    assert task_log.status == "SUCCESS"
+    assert task_log.fetched_count == 60
+    assert task_log.processed_count == 5
+    assert len(summaries) == 50
+    assert snapshot_ids == expected_ids
+    assert "paper-50" not in snapshot_ids
+    assert sum(1 for summary, _ in summaries if summary.category == "focus") == 5
+    assert sum(1 for summary, _ in summaries if summary.category == "candidate") == 45
