@@ -7,8 +7,8 @@ class Settings(BaseSettings):
     BACKEND_PUBLIC_URL: str = "http://localhost:8000"
     FRONTEND_URL: str = "http://localhost:5173"
     KIMI_API_KEY: str = ""
-    KIMI_BASE_URL: str = "https://api.moonshot.cn/v1"
-    KIMI_MODEL: str = "kimi-k2.5"
+    KIMI_BASE_URL: str = "https://api.minimaxi.com/v1"
+    KIMI_MODEL: str = "MiniMax-M2.5"
     KIMI_TIMEOUT_SECONDS: int = 60
     KIMI_LONGFORM_TIMEOUT_SECONDS: int = 180
     KIMI_MAX_RETRIES: int = 3
