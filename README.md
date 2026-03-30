@@ -1,68 +1,26 @@
-# AI 论文简报 (AI Paper Summary)
+# ArxivDaily
 
-为 AI 开发者提供高确定性、双语对齐、历史可追溯的每日论文简报系统。
+面向 AI 开发者的双语论文日报系统。
 
-本项目围绕“抓取真实论文源 -> 评分排序 -> AI 生成双语解读 -> 快照落库 -> Web / RSS / 订阅分发”这条主链构建，目标不是做一个简单的论文聚合站，而是做一个对技术从业者更友好的每日 AI 论文 briefing 产品。
+它不是简单的论文聚合页，而是一条完整的生产链：抓取真实论文源，按规则打分筛选，对入选论文生成中文标题和双语解读，按 `issue_date` 快照落库，并通过 Web 界面和邮件日报对外分发。
 
 <p align="center">
-  <img src="./image/Title%20Image.png" alt="AI Paper Summary 标题图" width="100%" />
+  <img src="./image/Title%20Image.png" alt="ArxivDaily 标题图" width="100%" />
 </p>
 
-## 1. 当前项目状态
+## 项目现在能做什么
 
-当前仓库已经具备一套可运行的全栈实现：
+- 聚合 `Hugging Face Daily Papers` 与 `arXiv` 多个 AI 方向的论文数据。
+- 使用 `GitHub Trending` 和 `Semantic Scholar` 为论文补充开源热度与学术影响信号。
+- 通过 8 类规则信号对论文打分，并按“数量优先”策略产出最多 `5` 篇 `Focus` 和最多 `12` 篇 `Watching`。
+- 对入选论文执行单篇隔离的 `Editor -> Writer -> Reviewer` 三阶段 LLM 链路，生成中文标题与双语摘要。
+- 将 `paper`、`paper_summary`、`paper_ai_trace`、`system_task_log` 等关键数据落到 MySQL，支持历史回看与排障。
+- 提供首页、论文详情、候选池、方向聚合、分类总览、订阅/退订页面。
+- 支持每日自动更新、每日简报邮件发送、任务失败告警邮件，以及 Ubuntu 单机部署。
 
-- 后端使用 FastAPI + SQLAlchemy + MySQL 提供论文列表、详情、订阅、退订和 RSS 接口。
-- 前端使用 Vue 3 + Element Plus 提供首页、详情页、候选池页、方向聚合页和分类页。
-- 真实生产链路已接入 Kimi API，采用 `Editor -> Writer -> Reviewer` 三阶段生成双语内容。
-- 评分策略已经切换为“数量优先发布”：
-  - 每天优先产出最多 `5` 篇 `Focus`
-  - 再产出最多 `12` 篇 `Watching`
-  - 实际数量取决于当天真实供给与 AI 生成结果
-- `paper_summary` 是按 `issue_date` 存储的快照真相表，历史期号可回溯。
-- `paper_ai_trace` 会把 `Editor / Writer / Reviewer` 的中间产物写入数据库，默认用于审计、排障与质检，不在前端直接展示。
+## 页面预览
 
-## 2. 这个项目解决什么问题
-
-面向 AI 开发者，每天的论文量很大，但真正值得看的论文往往被埋在大量信息里。这个项目试图解决 4 个实际问题：
-
-1. `论文太多，筛选成本高`
-   系统会聚合多个真实源，按统一规则评分，而不是只依赖单一榜单。
-2. `只看标题和摘要，判断价值成本高`
-   对入选论文生成中英文双语解读，并保留重点亮点与应用场景。
-3. `历史内容不可追溯`
-   每个 `issue_date` 都会生成自己的快照，后续查询不会被“最新状态”覆盖。
-4. `AI 结果不透明`
-   AI 三阶段中间产物会入库，失败轮次也会留痕，方便复盘问题来源。
-
-## 3. 当前产品能力
-
-### 3.1 用户可见功能
-
-- `首页 /`
-  按期号展示 `Focus` 和 `Watching`，支持中英切换，并提供进入论文分类页的按钮。
-- `论文详情 /paper/:id`
-  展示论文基础元数据、双语一句话总结、亮点、应用场景；Candidate 不显示 narrative。
-- `候选池 /sources/:date`
-  展示指定期号的全量候选池、总分、加分项、档位和候选原因。
-- `方向聚合 /topic/:name`
-  以固定方向 Taxonomy 聚合历史论文。
-- `分类总览 /topics`
-  提供方向入口页。
-
-### 3.2 后端能力
-
-- 多源抓取：Hugging Face Daily Papers、arXiv、GitHub Trending、Semantic Scholar
-- 评分引擎：8 类信号 + 固定方向 Taxonomy
-- 标题本地化：Kimi 生成 `title_zh`
-- 三阶段 AI 生成：`Editor -> Writer -> Reviewer`
-- 中间产物留痕：逐篇写入 `paper_ai_trace`
-- 订阅管理：验证 token、退订 token、24 小时有效期、写接口限流
-- RSS 输出：仅发布 `focus / watching`
-
-## 3.3 前端页面预览
-
-以下截图来自当前本地运行中的真实前端页面：
+当前前端的真实页面形态如下：
 
 <table>
   <tr>
@@ -71,30 +29,30 @@
       <br />
       <strong>首页</strong>
       <br />
-      按期号展示，并提供候选池与分类入口
+      每页只展示一天内容，右侧日历可快速跳转
     </td>
     <td align="center" width="50%">
-      <img src="./image/readme-detail.png" alt="详情页预览" width="100%" />
+      <img src="./image/readme-detail.png" alt="论文详情页预览" width="100%" />
       <br />
       <strong>论文详情页</strong>
       <br />
-      展示双语一句话总结、亮点和应用场景
+      展示双语一句话总结、亮点与应用场景
     </td>
   </tr>
   <tr>
     <td align="center" width="50%">
       <img src="./image/readme-sources.png" alt="候选池预览" width="100%" />
       <br />
-      <strong>原始候选池明细</strong>
+      <strong>候选池明细</strong>
       <br />
-      展示候选论文、总分、加分项、档位和候选原因
+      展示保留到快照中的全部候选论文、总分与加分项
     </td>
     <td align="center" width="50%">
       <img src="./image/readme-topics.png" alt="分类页预览" width="100%" />
       <br />
-      <strong>论文分类页</strong>
+      <strong>分类总览页</strong>
       <br />
-      提供固定方向 Taxonomy 的总览入口
+      提供固定方向 taxonomy 的入口
     </td>
   </tr>
   <tr>
@@ -103,148 +61,203 @@
       <br />
       <strong>方向聚合页</strong>
       <br />
-      以技术方向聚合历史论文，便于专题浏览
+      用技术方向聚合历史论文，适合做专题浏览
     </td>
   </tr>
 </table>
 
-## 4. 核心业务规则
+## 核心规则
 
-### 4.1 T+3 跑批规则
+### 1. 数据来源
 
-- `arxiv_publish_date`: 论文原始发布日期
-- `issue_date`: 简报发布日期
+当前抓取链路使用这 4 类真实外部来源：
+
+- `Hugging Face Daily Papers API`
+- `arXiv API`
+- `GitHub Trending`
+- `Semantic Scholar`
+
+其中：
+
+- Hugging Face 与 arXiv 提供论文主数据。
+- GitHub Trending 用于判断论文是否命中开源热度信号。
+- Semantic Scholar 用于计算 `academic_influence` 分数。
+
+### 2. 时间规则
+
+- `issue_date`：简报发布日期
 - `fetch_date = issue_date - 3 天`
 
-也就是说，系统每天跑批时，会抓取 3 天前发布的论文。
+日常任务会优先抓 `issue_date - 3` 的论文；如果当天供给为空，会继续向前回退最多 `3` 天寻找非空抓取结果。
 
-### 4.2 数量优先发布策略
+### 3. 评分机制
 
-当前产品决策已经从早期“硬性 3/8 基线”切换成“数量优先”：
+每篇论文会基于以下 8 类信号打分：
+
+1. 顶级机构作者
+2. Hugging Face Daily 推荐
+3. 社区热度（upvotes）
+4. 顶会/重要 venue
+5. 是否存在代码信号
+6. 工程实践相关关键词
+7. 学术影响力（由 citationCount 换算）
+8. GitHub Trending 开源趋势
+
+方向标签由标题和摘要中的 taxonomy 关键词规则推断，例如 `Agent`、`RAG`、`Reasoning`、`Vision_Image`、`Safety_Alignment` 等。
+
+### 4. 发布策略
+
+当前实现已经切换到“数量优先发布”：
 
 - `Focus`
-  - 优先选择 `score >= 80` 的论文
-  - 若不足 5 篇，则从剩余论文中按总分补足到 5 篇或候选耗尽
+  - 优先选取 `score >= 80` 的论文
+  - 若不足 `5` 篇，则从剩余高分论文中继续补位，直到达到 `5` 篇或候选耗尽
 - `Watching`
-  - 在剔除已进入 `Focus` 的论文后，从 `50 <= score < 80` 中按分数倒序截取最多 12 篇
-  - `Watching` 允许少于 12，必要时可以为 0
+  - 在剔除已进入 Focus 的论文后，从 `50 <= score < 80` 中按分数倒序取最多 `12` 篇
+  - 可以少于 `12`，必要时也可以为 `0`
 - `Candidate`
-  - `low_score`: 分数低于 50
-  - `capacity_overflow`: 达到阈值但未进入容量窗口
-  - `reviewer_rejected`: 进入 AI 流后被 Reviewer 剔除
+  - `low_score`：分数低于 `50`
+  - `capacity_overflow`：分数达到档位但超出容量窗口
+  - `reviewer_rejected`：进入 AI 生产链但最终未通过发布门禁
 
-### 4.3 AI 生成链路
+### 5. 候选池上限
 
-每个批次中的入选论文都走同一条主链：
+每天最终只保留评分前 `50` 名论文进入 `paper_summary` 快照。超过 `50` 的论文不会进入当天候选池页面。
+
+## AI 生产链
+
+### 当前实现
+
+入选论文会按“单篇隔离”的方式执行同一条主链：
 
 1. `Editor`
-   逐篇确定写作角度、核心痛点、具体解法
+   - 确定写作角度、核心痛点、具体解法
 2. `Writer`
-   生成双语一句话总结、亮点、应用场景
+   - 生成中文/英文一句话总结、亮点和应用场景
 3. `Reviewer`
-   给出 `PASSED / REJECTED` 审核结论
+   - 做最后一轮质量门禁，决定通过或拒绝
 
-注意：
+每个阶段的输出和失败重试都会写入 `paper_ai_trace`，用于审计和排障，不直接在前端展示。
 
-- 日常发布和历史回填当前共用同一条 `Pipeline.run(...)` 主链
-- 历史回填并没有绕开 `Editor -> Writer -> Reviewer`
-- AI 中间过程默认只入库，不直接展示到前端
+### 当前模型配置
 
-## 5. 技术架构
+当前仓库默认接入的是：
 
-### 5.1 技术栈
+- `MiniMax-M2.5`
+- OpenAI 兼容调用方式
+- `KIMI_BASE_URL=https://api.minimaxi.com/v1`
 
-- 后端：FastAPI、SQLAlchemy、PyMySQL、Pydantic Settings
-- 前端：Vue 3、Vue Router、Element Plus、Vite
-- 数据库：MySQL 8
-- LLM：Kimi API（Moonshot OpenAI 兼容接口）
+为了兼容历史实现，部分环境变量仍沿用 `KIMI_*` 前缀，但当前默认服务商已经是 `MiniMax`，不是 Moonshot Kimi。
 
-### 5.2 架构分层
+## 数据落库方式
 
-```text
-外部数据源
-  -> Crawler
-  -> Scorer
-  -> AIProcessor (Title Localization / Editor / Writer / Reviewer)
-  -> Pipeline
-  -> MySQL (paper / paper_summary / paper_ai_trace / system_task_log / subscriber)
-  -> FastAPI API
-  -> Vue Web UI / RSS / 邮件订阅
-```
-
-### 5.2.1 结构图
-
-<p align="center">
-  <img src="./image/Structural%20diagram.png" alt="AI Paper Summary 结构图" width="100%" />
-</p>
-
-### 5.3 关键数据表
+### 关键数据表
 
 - `paper`
-  静态元数据表，存 `arxiv_id`、双语标题、作者、venue、abstract、pdf_url 等。
+  - 论文静态元数据，如 `arxiv_id`、中英文标题、作者、venue、abstract、pdf_url
 - `paper_summary`
-  以 `issue_date` 为核心的期号快照表，是前端查询和历史回溯的真相源。
+  - 以 `issue_date` 为核心的快照表，是首页、详情页、候选池和方向页的查询真相源
 - `paper_ai_trace`
-  存储 `Editor / Writer / Reviewer` 的逐篇中间产物与 attempt 留痕。
+  - `Editor / Writer / Reviewer` 的中间产物与状态留痕
 - `system_task_log`
-  记录每个期号的任务状态、抓取数量、处理数量和错误日志。
+  - 每个期号任务的抓取数量、处理数量、成功/失败状态与错误日志
 - `subscriber`
-  管理订阅状态、验证 token、退订 token 及过期时间。
+  - 邮件订阅状态、验证 token、退订 token
+- `notification_delivery_log`
+  - 日报邮件与任务告警邮件的发送审计与幂等留痕
 
-## 6. 目录结构
+### 一个实现细节
+
+当前 `paper` 表并不持久化原始 `citationCount`。系统会在打分阶段实时获取引用数，并把换算后的 `academic_influence` 分数落到 `paper_summary.score_reasons` 中。
+
+## 系统结构
+
+```text
+External Sources
+  -> Crawler
+  -> Scorer
+  -> Pipeline
+     -> Title Localization
+     -> Editor
+     -> Writer
+     -> Reviewer
+  -> MySQL
+  -> FastAPI API
+  -> Vue Web UI / Email Digest
+```
+
+<p align="center">
+  <img src="./image/Structural%20diagram.png" alt="ArxivDaily 结构图" width="100%" />
+</p>
+
+## 前后端能力边界
+
+### 前端
+
+- 首页 `/`
+  - 每页只展示一个 `issue_date`
+  - 右侧日历可快速跳转
+  - 无数据日期显示为灰色
+- 详情页 `/paper/:id`
+  - 展示双语解读与论文基础信息
+- 候选池页 `/sources/:date`
+  - 展示当天保留到快照中的全部候选论文
+- 方向页 `/topic/:name`
+  - 某个固定方向下的历史论文聚合
+- 分类总览页 `/topics`
+  - 展示全部方向入口
+- 退订页 `/unsubscribe`
+  - 供邮件中的退订链接回跳使用
+
+### 后端
+
+- 论文列表、详情、候选池、日历数据接口
+- 邮件订阅、邮箱验证、退订接口
+- 每日更新、历史回填、日报发送、cron 安装脚本
+- Ubuntu `systemd + nginx + cron` 的生产部署资产
+
+## 仓库结构
 
 ```text
 .
 ├── backend/
 │   ├── app/
 │   │   ├── api/v1/            # FastAPI 路由
-│   │   ├── core/              # 配置与全局规格
+│   │   ├── core/              # 配置与规格常量
 │   │   ├── db/                # SQLAlchemy engine / session
 │   │   ├── models/            # ORM 模型
-│   │   ├── schemas/           # Pydantic 响应模型
-│   │   └── services/          # crawler / scorer / ai_processor / pipeline
+│   │   ├── schemas/           # Pydantic 模型
+│   │   └── services/          # crawler / scorer / ai_processor / pipeline / mailer
 │   ├── prompts/               # Editor / Writer / Reviewer 提示词
-│   ├── scripts/               # 本地初始化、联调、回填脚本
+│   ├── scripts/               # 跑批、回填、发报、部署辅助脚本
 │   ├── requirements.txt
-│   └── requirements-test.txt
+│   └── .env.example
 ├── frontend/
+│   ├── public/
 │   ├── src/
-│   │   ├── api/               # 前端 API 适配层
-│   │   ├── router/            # Vue Router
-│   │   └── views/             # 页面视图
+│   │   ├── api/
+│   │   ├── router/
+│   │   └── views/
 │   └── package.json
 ├── database/
-│   ├── schema.sql             # 全新库初始化脚本
-│   └── migrate_v225.sql       # 存量库迁移脚本
+│   ├── schema.sql
+│   └── migrate_v225.sql
+├── deploy/linux/
+│   ├── ai-paper-summary.nginx.conf
+│   ├── ai-paper-summary-backend.service
+│   └── DEPLOY.md
 ├── tests/
-│   ├── backend/               # 后端 unit / integration
-│   ├── frontend/              # 前端 vitest
-│   ├── live/                  # 真实外网 crawler 测试
-│   ├── smoke/                 # 编译 / 导入 / build 烟测
-│   └── fixtures/              # 测试样例
-├── .nexus-map/                # 代码库结构知识图谱
-└── Detailed_PRD.md            # 当前产品与系统真相规格
+│   ├── backend/
+│   ├── frontend/
+│   ├── live/
+│   ├── smoke/
+│   └── fixtures/
+└── Detailed_PRD.md
 ```
 
-## 7. 环境要求
+## 本地启动
 
-- Python `3.10+`
-- Node.js `18+`
-- MySQL `8.0+`
-- 可用的 Kimi API Key
-
-## 8. 快速启动
-
-### 8.1 克隆仓库
-
-```bash
-git clone https://github.com/Mr-silence/AI_paper_summary_website.git
-cd AI_paper_summary_website
-```
-
-### 8.2 后端配置
-
-#### 1. 创建虚拟环境并安装依赖
+### 1. 后端
 
 ```bash
 cd backend
@@ -252,291 +265,172 @@ python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 pip install -r requirements-test.txt
-```
-
-#### 2. 配置 `backend/.env`
-
-推荐先复制 [backend/.env.example](/Users/zhangshijie/Desktop/Project/AI_paper_summary_website/backend/.env.example) 再改成你的实际值：
-
-```bash
-cd backend
 cp .env.example .env
 ```
 
+至少需要配置这些环境变量：
+
 ```env
-PROJECT_NAME="AI Paper Summary API"
-DATABASE_URL="mysql+pymysql://root:password@localhost:3306/ai_paper_summary"
-BACKEND_PUBLIC_URL="http://127.0.0.1:8000"
-FRONTEND_URL="http://127.0.0.1:5173"
-KIMI_API_KEY="your-kimi-api-key"
-KIMI_BASE_URL="https://api.moonshot.cn/v1"
-KIMI_MODEL="kimi-k2.5"
-KIMI_TIMEOUT_SECONDS=60
-KIMI_LONGFORM_TIMEOUT_SECONDS=180
-KIMI_MAX_RETRIES=3
-KIMI_TITLE_BATCH_SIZE=8
-PIPELINE_PROBE_DAYS=14
-MYSQL_UNIX_SOCKET=""
-SMTP_HOST="smtp.example.com"
+DATABASE_URL=mysql+pymysql://root:password@localhost:3306/ai_paper_summary
+BACKEND_PUBLIC_URL=http://127.0.0.1:8000
+FRONTEND_URL=http://127.0.0.1:5173
+
+MINIMAX_API_KEY=your-api-key
+KIMI_BASE_URL=https://api.minimaxi.com/v1
+KIMI_MODEL=MiniMax-M2.5
+
+SMTP_HOST=smtp.example.com
 SMTP_PORT=587
-SMTP_USERNAME="your-smtp-username"
-SMTP_PASSWORD="your-smtp-password"
-SMTP_FROM_EMAIL="no-reply@example.com"
-SMTP_FROM_NAME="AI Paper Summary"
-SMTP_USE_STARTTLS=true
-SMTP_USE_SSL=false
-OWNER_ALERT_EMAIL="z1332556430@gmail.com"
-HUGGINGFACE_API_URL="https://huggingface.co/api/daily_papers"
+SMTP_FROM_EMAIL=no-reply@example.com
+OWNER_ALERT_EMAIL=you@example.com
 ```
 
-#### 3. 初始化 MySQL 和数据库
+初始化数据库：
 
-推荐优先使用脚本，而不是直接手动跑 SQL：
+```bash
+cd backend
+./venv/bin/python scripts/setup_local_db.py
+```
+
+如果你本机是 Oracle 安装包版 MySQL，仓库还提供了一个系统 MySQL 引导脚本：
 
 ```bash
 cd backend
 ./venv/bin/python scripts/setup_local_mysql.py
-./venv/bin/python scripts/setup_local_db.py
 ```
 
-说明：
-
-- `setup_local_mysql.py` 用于准备本机 MySQL 服务
-- `setup_local_db.py` 会执行 schema 初始化、必要的列修正和 schema 校验
-
-如果你是在已有旧库上迁移：
-
-```bash
-cd backend
-./venv/bin/python scripts/setup_local_db.py --migrate-existing
-```
-
-#### 4. 检查 Kimi API 连通性
-
-```bash
-cd backend
-./venv/bin/python scripts/check_kimi_api.py
-```
-
-#### 5. 启动后端
+启动后端：
 
 ```bash
 cd backend
 ./venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-后端默认地址：
-
-- API: [http://127.0.0.1:8000](http://127.0.0.1:8000)
-- Swagger: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
-
-### 8.3 前端配置
-
-#### 1. 安装依赖
+### 2. 前端
 
 ```bash
 cd frontend
 npm install
 ```
 
-#### 2. 配置 `frontend/.env.local`
+开发环境 `.env.local`：
 
 ```env
 VITE_API_BASE_URL=http://127.0.0.1:8000
 ```
 
-#### 3. 启动开发服务器
+启动前端：
 
 ```bash
 cd frontend
 npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
-前端默认地址：
-
-- Web UI: [http://127.0.0.1:5173](http://127.0.0.1:5173)
-
-#### 4. 生产构建
+生产构建：
 
 ```bash
 cd frontend
 npm run build
 ```
 
-生产环境默认读取 [frontend/.env.production](/Users/zhangshijie/Desktop/Project/AI_paper_summary_website/frontend/.env.production)：
+`frontend/.env.production` 当前保持为空字符串，因为前端生产环境直接请求同源 `/api/v1/...`，由 `nginx` 负责反向代理。
 
-```env
-VITE_API_BASE_URL=
-```
+## 日常运行与运维脚本
 
-当前前端 API 模块本身就直接请求 `/api/v1/...`，所以生产环境不再额外附加 base URL，避免出现 `/api/api/v1/...` 的双重前缀。由 `nginx` 负责把这些同源 `/api/...` 请求反代到 FastAPI。
-
-### 8.4 Ubuntu 生产部署
-
-当前仓库已经补齐了 Ubuntu 单机部署所需的基础资产：
-
-- `nginx` 配置：[deploy/linux/ai-paper-summary.nginx.conf](/Users/zhangshijie/Desktop/Project/AI_paper_summary_website/deploy/linux/ai-paper-summary.nginx.conf)
-- `systemd` 服务：[deploy/linux/ai-paper-summary-backend.service](/Users/zhangshijie/Desktop/Project/AI_paper_summary_website/deploy/linux/ai-paper-summary-backend.service)
-- 部署说明：[deploy/linux/DEPLOY.md](/Users/zhangshijie/Desktop/Project/AI_paper_summary_website/deploy/linux/DEPLOY.md)
-
-生产部署目标固定为：
-
-- 仓库目录：`/srv/ai-paper-summary`
-- 后端：`uvicorn` 监听 `127.0.0.1:8000`
-- 前端：`frontend/dist` 由 `nginx` 直接托管
-- API：浏览器访问 `http://43.155.154.193`，前端通过 `/api` 同源调用后端
-- 数据库：Ubuntu 本机 `mysql-server`
-- 定时任务：`cron` 在 `08:00 / 08:30` 执行更新和日报发送
-
-服务器上的关键环境变量建议如下：
-
-```env
-DATABASE_URL=mysql+pymysql://ai_paper_summary:<password>@localhost:3306/ai_paper_summary
-MYSQL_UNIX_SOCKET=
-BACKEND_PUBLIC_URL=http://43.155.154.193
-FRONTEND_URL=http://43.155.154.193
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USERNAME=z1332556430@gmail.com
-SMTP_PASSWORD=<gmail-app-password>
-SMTP_FROM_EMAIL=z1332556430@gmail.com
-SMTP_FROM_NAME=AI Paper Summary
-SMTP_USE_STARTTLS=true
-SMTP_USE_SSL=false
-OWNER_ALERT_EMAIL=z1332556430@gmail.com
-```
-
-部署流程摘要：
-
-1. 安装 `git / python3-venv / mysql-server / nginx / nodejs`
-2. 从 GitHub 拉取代码到 `/srv/ai-paper-summary`
-3. 配置 `backend/.env`
-4. 导入 `ai_paper_summary` MySQL 数据
-5. 执行 `scripts/setup_local_db.py`
-6. 构建前端 `npm run build`
-7. 安装 `systemd` 与 `nginx` 配置
-8. 执行 `scripts/install_linux_cron.py`
-
-更完整的命令清单见 [deploy/linux/DEPLOY.md](/Users/zhangshijie/Desktop/Project/AI_paper_summary_website/deploy/linux/DEPLOY.md)。
-
-生产部署补充说明：
-
-- `backend/requirements.txt` 现在显式包含 `cryptography`，用于兼容 Ubuntu MySQL 默认的 `caching_sha2_password` 认证方式
-- 服务器侧应确保 `mysql`、`ai-paper-summary-backend`、`nginx` 三个服务都通过 `systemctl enable` 设置为开机自启
-- `cron` 任务安装在 `ubuntu` 用户 crontab 中，系统重启后会继续生效，无需手动重装
-
-## 9. 运行脚本
-
-### 9.1 Linux 定时更新脚本
-
-每天 `08:00` 的正式更新入口：
+### 日更任务
 
 ```bash
 cd backend
 ./venv/bin/python scripts/run_daily_update_job.py
 ```
 
-每天 `08:30` 的日报发送入口：
+- 按上海时区计算当日 `issue_date`
+- 调用共享的 `run_issue_pipeline(...)`
+- 失败时向 `OWNER_ALERT_EMAIL` 发告警邮件
+
+### 每日简报邮件
 
 ```bash
 cd backend
 ./venv/bin/python scripts/send_daily_digest.py
 ```
 
-Linux `cron` 安装脚本：
+- 只会在当日 `issue_date` 成功生成后发送
+- 只发送给 `subscriber.status = 1` 的有效订阅用户
+- 发送前会刷新退订 token
 
-```bash
-cd backend
-./venv/bin/python scripts/install_linux_cron.py --print-only
-./venv/bin/python scripts/install_linux_cron.py
-```
-
-说明：
-
-- `run_daily_update_job.py` 会按上海时区计算当日 `issue_date`，失败时给 `OWNER_ALERT_EMAIL` 发告警邮件
-- `send_daily_digest.py` 只会在当日期号 `SUCCESS` 后向有效订阅用户发送日报
-- `install_linux_cron.py` 会在当前用户 crontab 中写入 `08:00` 更新和 `08:30` 发报两条定时任务
-
-### 9.2 运行一次完整流水线
+### 跑一次完整流水线
 
 ```bash
 cd backend
 ./venv/bin/python scripts/run_pipeline_once.py
 ```
 
-行为说明：
-
-- 先检查 prompt、MySQL、数据库、Kimi
-- 再在最近 `PIPELINE_PROBE_DAYS` 天内自动探测可跑的 `issue_date`
-- 然后执行一次完整的 `Pipeline.run(...)`
-
-### 9.3 指定某个期号跑批
+### 指定日期回填
 
 ```bash
 cd backend
-PIPELINE_FIXED_ISSUE_DATE=2026-03-25 ./venv/bin/python scripts/run_pipeline_once.py
+./venv/bin/python scripts/backfill_issue_range.py --start-date 2026-02-13 --end-date 2026-03-30
 ```
 
-### 9.4 历史区间回填
+当前历史回填和日常发布共享同一条入口：
+
+- [backend/app/services/issue_pipeline_runner.py](/Users/zhangshijie/Desktop/Project/AI_paper_summary_website/backend/app/services/issue_pipeline_runner.py)
+
+这意味着两者都会调用同一套：
+
+- `Crawler`
+- `Scorer`
+- `Pipeline.run(...)`
+- `Editor -> Writer -> Reviewer`
+
+## Ubuntu 生产部署
+
+仓库已经提供了 Linux 单机部署资产：
+
+- `nginx` 配置：`deploy/linux/ai-paper-summary.nginx.conf`
+- `systemd` 服务：`deploy/linux/ai-paper-summary-backend.service`
+- 部署说明：`deploy/linux/DEPLOY.md`
+
+当前推荐的生产形态是：
+
+- `MySQL`：本机服务
+- `FastAPI`：`uvicorn` 监听 `127.0.0.1:8000`
+- `Vue`：`frontend/dist` 交给 `nginx` 托管
+- `systemd`：托管后端服务
+- `cron`：`08:00` 更新、`08:30` 发日报
+
+安装 cron：
 
 ```bash
 cd backend
-./venv/bin/python scripts/backfill_issue_range.py --start-date 2026-02-13 --end-date 2026-03-25
+./venv/bin/python scripts/install_linux_cron.py
 ```
 
-说明：
+## 测试
 
-- 历史回填当前和日常发布共用同一条 `Pipeline.run(...)` 主链
-- 会按期号逐天执行，并在 `system_task_log` 中留下结果
-
-### 9.5 历史中文标题回填
-
-```bash
-cd backend
-./venv/bin/python scripts/backfill_title_zh.py
-```
-
-适用场景：
-
-- 旧库中 `title_zh` 仍是英文原题
-- schema 已迁好，但历史数据契约还没补齐
-
-## 10. 测试
-
-### 10.1 后端主回归
+### 后端主回归
 
 ```bash
 cd backend
 ./venv/bin/pytest ../tests/backend ../tests/smoke
 ```
 
-覆盖：
-
-- unit：评分、AI parser、pipeline 规则、schema 校验
-- integration：论文接口、订阅/退订接口
-- smoke：导入、脚本、前端 build 烟测
-
-### 10.2 真实外网 crawler 测试
+### 真实外网 crawler 测试
 
 ```bash
 cd backend
 ./venv/bin/pytest ../tests/live
 ```
 
-说明：
-
-- 这组测试会访问真实外网
-- 当前主要覆盖 Hugging Face、arXiv、GitHub Trending、Semantic Scholar 和 crawler 合并链路
-- 它不是完整的“Kimi + MySQL + API + 前端”全链路 E2E
-
-### 10.3 前端测试
+### 前端测试
 
 ```bash
 cd frontend
 npm run test:run
 ```
 
-### 10.4 常用本地校验
+### 常用烟测
 
 ```bash
 cd backend
@@ -546,47 +440,21 @@ cd frontend
 npm run build
 ```
 
-## 11. API 概览
+## 当前边界与已知事实
 
-统一响应 envelope：
+- `tests/live` 只覆盖真实外网 crawler，不等同于完整的 `LLM + MySQL + API + 前端` 全链路回归。
+- AI 中间产物已经落库，但默认不在前端显示。
+- 当前 README 不再把 RSS 作为正式产品能力描述，因为这条需求目前不作为项目主功能承诺。
+- 代码里仍保留一部分历史命名，例如 `KIMI_*` 配置前缀，但当前默认模型服务商是 `MiniMax`。
+- Vite 生产构建目前仍会提示主 chunk 偏大，但不影响构建成功。
 
-```json
-{
-  "code": 200,
-  "msg": "success",
-  "data": {}
-}
-```
+## 进一步阅读
 
-主要接口：
-
-| 接口 | 方法 | 说明 |
-| --- | --- | --- |
-| `/api/v1/papers` | `GET` | 获取论文列表，支持 `category`、`direction`、`issue_date`、`include_candidates` |
-| `/api/v1/papers/{paper_id}` | `GET` | 获取论文详情 |
-| `/api/v1/subscribe` | `POST` | 发起订阅 |
-| `/api/v1/subscribe/verify` | `GET` | 验证订阅 |
-| `/api/v1/unsubscribe` | `POST` | 执行退订 |
-| `/api/v1/rss` | `GET` | 获取 RSS |
-
-## 12. 当前测试与实现边界
-
-这个 README 按当前仓库状态描述，但有几条边界需要明确：
-
-- `tests/live` 当前只覆盖 crawler 真实外网探测，不等同于完整 live pipeline 回归。
-- AI 中间产物虽然已入库，但默认不在前端展示。
-- 前端和后端的主回归已经成体系，但真实 `Kimi + MySQL + 外网数据 + 前端页面` 的整条联调仍主要依赖脚本和人工验收。
-- 当前已知仍有一些非阻塞告警：
-  - SQLAlchemy `declarative_base()` deprecation
-  - Element Plus `el-link underline` deprecation
-  - Vite build 的大 chunk 警告
-
-## 13. 进一步阅读
-
-- 产品与系统真相规格：[Detailed_PRD.md](/Users/zhangshijie/Desktop/Project/AI_paper_summary_website/Detailed_PRD.md)
+- 产品规格：[Detailed_PRD.md](/Users/zhangshijie/Desktop/Project/AI_paper_summary_website/Detailed_PRD.md)
 - 代码图谱入口：[.nexus-map/INDEX.md](/Users/zhangshijie/Desktop/Project/AI_paper_summary_website/.nexus-map/INDEX.md)
 - 测试说明：[tests/README.md](/Users/zhangshijie/Desktop/Project/AI_paper_summary_website/tests/README.md)
+- Linux 部署说明：[deploy/linux/DEPLOY.md](/Users/zhangshijie/Desktop/Project/AI_paper_summary_website/deploy/linux/DEPLOY.md)
 
-## 14. 许可证
+## License
 
-MIT License
+MIT
