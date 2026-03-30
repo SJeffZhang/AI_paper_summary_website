@@ -25,7 +25,7 @@
 <table>
   <tr>
     <td align="center" width="50%">
-      <img src="./image/readme-home.png" alt="首页预览" width="100%" />
+      <img src="./image/readme-home-v2.png" alt="首页预览" width="100%" />
       <br />
       <strong>首页</strong>
       <br />
