@@ -239,6 +239,49 @@ def test_process_category_batch_skips_watching_items_promoted_to_focus():
     assert run_calls == []
 
 
+def test_process_category_batch_skips_items_already_attempted_in_previous_category():
+    shared_summary = SimpleNamespace(
+        category="watching",
+        candidate_reason=None,
+        one_line_summary=None,
+        one_line_summary_en=None,
+        core_highlights=None,
+        core_highlights_en=None,
+        application_scenarios=None,
+        application_scenarios_en=None,
+    )
+
+    pipeline = Pipeline.__new__(Pipeline)
+    pipeline._ensure_localized_title = lambda paper: None
+    run_calls = []
+
+    def fake_run_ai_batch(papers, category):
+        run_calls.append((category, [paper["arxiv_id"] for paper in papers]))
+        return ([], ["overlap-paper"])
+
+    pipeline._run_ai_batch = fake_run_ai_batch
+    seen_ids = set()
+
+    processed_focus = pipeline._process_category_batch(
+        initial_batch=[],
+        overflow_batch=[{"arxiv_id": "overlap-paper", "_summary": shared_summary}],
+        category="focus",
+        target_count=1,
+        seen_ids=seen_ids,
+    )
+    processed_watching = pipeline._process_category_batch(
+        initial_batch=[{"arxiv_id": "overlap-paper", "_summary": shared_summary}],
+        overflow_batch=[],
+        category="watching",
+        target_count=1,
+        seen_ids=seen_ids,
+    )
+
+    assert processed_focus == 0
+    assert processed_watching == 0
+    assert run_calls == [("focus", ["overlap-paper"])]
+
+
 def test_process_category_batch_processes_each_paper_in_isolation():
     summaries = [
         SimpleNamespace(

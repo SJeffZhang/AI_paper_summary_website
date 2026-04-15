@@ -91,6 +91,7 @@ class Pipeline:
                 watching_overflow = []
 
             snapshot_papers = scored_papers
+            issue_attempted_ids: set[str] = set()
 
             for paper in snapshot_papers:
                 paper["title_zh"] = self.ai_processor.build_fallback_title(paper["title_original"])
@@ -110,6 +111,7 @@ class Pipeline:
                 overflow_batch=focus_overflow,
                 category="focus",
                 target_count=len(focus_selected),
+                seen_ids=issue_attempted_ids,
             )
             if watching_enabled:
                 processed_count += self._process_category_batch(
@@ -117,6 +119,7 @@ class Pipeline:
                     overflow_batch=watching_overflow,
                     category="watching",
                     target_count=len(watching_selected),
+                    seen_ids=issue_attempted_ids,
                 )
 
             if processed_count == 0:
@@ -279,12 +282,14 @@ class Pipeline:
         overflow_batch: Sequence[Dict[str, Any]],
         category: str,
         target_count: int,
+        seen_ids: set[str] | None = None,
     ) -> int:
         accepted_ids = set()
         rejected_blacklist = set()
         queued_batch = list(initial_batch) + list(overflow_batch)
         attempted_count = 0
         max_attempts = self._max_category_attempts(category, target_count, len(queued_batch))
+        seen_ids = seen_ids if seen_ids is not None else set()
 
         while queued_batch and len(accepted_ids) < target_count and attempted_count < max_attempts:
             paper = queued_batch.pop(0)
@@ -294,10 +299,11 @@ class Pipeline:
             # Skip it when iterating the watching stage to avoid duplicate AI trace writes.
             if category != "focus" and summary.category == "focus":
                 continue
-            if arxiv_id in rejected_blacklist or arxiv_id in accepted_ids:
+            if arxiv_id in seen_ids or arxiv_id in rejected_blacklist or arxiv_id in accepted_ids:
                 continue
 
             attempted_count += 1
+            seen_ids.add(arxiv_id)
             _safe_progress_log(
                 (
                     f"[pipeline][{category}] processing {arxiv_id} "
