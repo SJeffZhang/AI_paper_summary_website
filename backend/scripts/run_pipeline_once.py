@@ -15,7 +15,7 @@ from app.core.specs import FOCUS_CAPACITY, FOCUS_THRESHOLD, WATCHING_CAPACITY, W
 from app.db.session import SessionLocal
 from app.models.domain import PaperSummary, SystemTaskLog
 from app.services.crawler import Crawler
-from app.services.pipeline import Pipeline
+from app.services.issue_pipeline_runner import run_issue_pipeline
 from app.services.scorer import Scorer
 from scripts.check_kimi_api import run_checks
 from scripts.setup_local_db import ensure_database_ready
@@ -172,11 +172,11 @@ def run_pipeline_once() -> dict[str, object]:
         flush=True,
     )
 
+    print("[run] executing pipeline", flush=True)
+    run_issue_pipeline(selected_issue_date)
+
     db = SessionLocal()
     try:
-        print("[run] executing pipeline", flush=True)
-        Pipeline(db).run(probe["issue_date"])
-
         summary_counts = dict(
             db.query(PaperSummary.category, func.count(PaperSummary.id))
             .filter(PaperSummary.issue_date == probe["issue_date"])
