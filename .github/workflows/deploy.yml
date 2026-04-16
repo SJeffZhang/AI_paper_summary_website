@@ -148,6 +148,28 @@ jobs:
           set -euo pipefail
           ssh -i "${HOME}/.ssh/deploy_key" -p "${DEPLOY_PORT}" "${DEPLOY_USER}@${DEPLOY_HOST}" 'bash -se' <<'REMOTE' 2>&1 | tee "${RUNNER_TEMP}/deploy.log"
           set -euo pipefail
+          wait_for_http() {
+            local description="$1"
+            local command="$2"
+            local attempts="${3:-15}"
+            local sleep_seconds="${4:-2}"
+            local attempt=1
+
+            until bash -lc "${command}" >/dev/null 2>&1; do
+              if [ "${attempt}" -ge "${attempts}" ]; then
+                echo "Health check failed: ${description}"
+                sudo systemctl status ai-paper-summary-backend --no-pager -l || true
+                echo "--- recent journal ---"
+                sudo journalctl -u ai-paper-summary-backend -n 80 --no-pager -l || true
+                return 1
+              fi
+
+              echo "Waiting for ${description} (${attempt}/${attempts})..."
+              attempt=$((attempt + 1))
+              sleep "${sleep_seconds}"
+            done
+          }
+
           cd /srv/ai-paper-summary
           git fetch origin main
           git checkout main
@@ -168,8 +190,16 @@ jobs:
           npm ci
           npm run build
           sudo systemctl restart ai-paper-summary-backend
-          curl --fail --silent --show-error http://127.0.0.1:8000/api/v1/papers/calendar >/dev/null
-          curl --fail --silent --show-error -H "Host: arxivdaily.tech" http://127.0.0.1/api/v1/papers/calendar >/dev/null
+          wait_for_http \
+            "backend on 127.0.0.1:8000" \
+            "curl --fail --silent --show-error http://127.0.0.1:8000/api/v1/papers/calendar" \
+            20 \
+            2
+          wait_for_http \
+            "nginx reverse proxy on 127.0.0.1 with Host arxivdaily.tech" \
+            "curl --fail --silent --show-error -H 'Host: arxivdaily.tech' http://127.0.0.1/api/v1/papers/calendar" \
+            20 \
+            2
           REMOTE
 
       - name: Upload deploy log
