@@ -1,0 +1,181 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: deploy-production
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main')
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      MYSQL_UNIX_SOCKET: ${{ secrets.MYSQL_UNIX_SOCKET }}
+      BACKEND_PUBLIC_URL: ${{ secrets.BACKEND_PUBLIC_URL }}
+      FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
+      KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
+      MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+      KIMI_BASE_URL: ${{ secrets.KIMI_BASE_URL }}
+      KIMI_MODEL: ${{ secrets.KIMI_MODEL }}
+      KIMI_TIMEOUT_SECONDS: ${{ secrets.KIMI_TIMEOUT_SECONDS }}
+      KIMI_LONGFORM_TIMEOUT_SECONDS: ${{ secrets.KIMI_LONGFORM_TIMEOUT_SECONDS }}
+      KIMI_MAX_RETRIES: ${{ secrets.KIMI_MAX_RETRIES }}
+      KIMI_LONGFORM_MAX_RETRIES: ${{ secrets.KIMI_LONGFORM_MAX_RETRIES }}
+      KIMI_TITLE_BATCH_SIZE: ${{ secrets.KIMI_TITLE_BATCH_SIZE }}
+      PIPELINE_MAX_CATEGORY_ATTEMPTS: ${{ secrets.PIPELINE_MAX_CATEGORY_ATTEMPTS }}
+      PIPELINE_FOCUS_ATTEMPT_MULTIPLIER: ${{ secrets.PIPELINE_FOCUS_ATTEMPT_MULTIPLIER }}
+      PIPELINE_WATCHING_ATTEMPT_MULTIPLIER: ${{ secrets.PIPELINE_WATCHING_ATTEMPT_MULTIPLIER }}
+      PIPELINE_ENABLE_WATCHING: ${{ secrets.PIPELINE_ENABLE_WATCHING }}
+      PIPELINE_REVIEWER_STRICT: ${{ secrets.PIPELINE_REVIEWER_STRICT }}
+      PIPELINE_PROBE_DAYS: ${{ secrets.PIPELINE_PROBE_DAYS }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      SMTP_FROM_EMAIL: ${{ secrets.SMTP_FROM_EMAIL }}
+      SMTP_FROM_NAME: ${{ secrets.SMTP_FROM_NAME }}
+      SMTP_USE_STARTTLS: ${{ secrets.SMTP_USE_STARTTLS }}
+      SMTP_USE_SSL: ${{ secrets.SMTP_USE_SSL }}
+      OWNER_ALERT_EMAIL: ${{ secrets.OWNER_ALERT_EMAIL }}
+      SEMANTIC_SCHOLAR_TIMEOUT_SECONDS: ${{ secrets.SEMANTIC_SCHOLAR_TIMEOUT_SECONDS }}
+      CRAWLER_CITATION_MAX_WORKERS: ${{ secrets.CRAWLER_CITATION_MAX_WORKERS }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || 'main' }}
+
+      - name: Configure SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${HOME}/.ssh"
+          chmod 700 "${HOME}/.ssh"
+          printf '%s\n' "${DEPLOY_SSH_KEY}" > "${HOME}/.ssh/deploy_key"
+          chmod 600 "${HOME}/.ssh/deploy_key"
+          printf '%s\n' "${DEPLOY_KNOWN_HOSTS}" > "${HOME}/.ssh/known_hosts"
+          chmod 644 "${HOME}/.ssh/known_hosts"
+
+      - name: Render production backend env
+        run: |
+          set -euo pipefail
+          : "${DEPLOY_HOST:?DEPLOY_HOST secret is required}"
+          : "${DEPLOY_PORT:=22}"
+          : "${DEPLOY_USER:?DEPLOY_USER secret is required}"
+          : "${DATABASE_URL:?DATABASE_URL secret is required}"
+          : "${BACKEND_PUBLIC_URL:?BACKEND_PUBLIC_URL secret is required}"
+          : "${FRONTEND_URL:?FRONTEND_URL secret is required}"
+          : "${SMTP_HOST:?SMTP_HOST secret is required}"
+          : "${SMTP_PORT:=587}"
+          : "${SMTP_USERNAME:?SMTP_USERNAME secret is required}"
+          : "${SMTP_PASSWORD:?SMTP_PASSWORD secret is required}"
+          : "${SMTP_FROM_EMAIL:?SMTP_FROM_EMAIL secret is required}"
+          : "${OWNER_ALERT_EMAIL:?OWNER_ALERT_EMAIL secret is required}"
+          export MYSQL_UNIX_SOCKET="${MYSQL_UNIX_SOCKET:-}"
+          export KIMI_API_KEY="${KIMI_API_KEY:-}"
+          export MINIMAX_API_KEY="${MINIMAX_API_KEY:-}"
+          export KIMI_BASE_URL="${KIMI_BASE_URL:-https://api.minimaxi.com/v1}"
+          export KIMI_MODEL="${KIMI_MODEL:-MiniMax-M2.5}"
+          export KIMI_TIMEOUT_SECONDS="${KIMI_TIMEOUT_SECONDS:-60}"
+          export KIMI_LONGFORM_TIMEOUT_SECONDS="${KIMI_LONGFORM_TIMEOUT_SECONDS:-180}"
+          export KIMI_MAX_RETRIES="${KIMI_MAX_RETRIES:-3}"
+          export KIMI_LONGFORM_MAX_RETRIES="${KIMI_LONGFORM_MAX_RETRIES:-2}"
+          export KIMI_MIN_REQUEST_INTERVAL_SECONDS="1.5"
+          export KIMI_LONGFORM_MIN_REQUEST_INTERVAL_SECONDS="2.5"
+          export KIMI_EDITOR_MAX_TOKENS="1400"
+          export KIMI_WRITER_FOCUS_MAX_TOKENS="1800"
+          export KIMI_WRITER_WATCHING_MAX_TOKENS="1300"
+          export KIMI_REVIEWER_MAX_TOKENS="512"
+          export KIMI_TITLE_LOCALIZATION_ATTEMPTS="4"
+          export KIMI_TITLE_BATCH_SIZE="${KIMI_TITLE_BATCH_SIZE:-8}"
+          export PIPELINE_MAX_CATEGORY_ATTEMPTS="${PIPELINE_MAX_CATEGORY_ATTEMPTS:-30}"
+          export PIPELINE_FOCUS_ATTEMPT_MULTIPLIER="${PIPELINE_FOCUS_ATTEMPT_MULTIPLIER:-4}"
+          export PIPELINE_WATCHING_ATTEMPT_MULTIPLIER="${PIPELINE_WATCHING_ATTEMPT_MULTIPLIER:-2}"
+          export PIPELINE_ENABLE_WATCHING="${PIPELINE_ENABLE_WATCHING:-true}"
+          export PIPELINE_REVIEWER_STRICT="${PIPELINE_REVIEWER_STRICT:-true}"
+          export PIPELINE_PROBE_DAYS="${PIPELINE_PROBE_DAYS:-14}"
+          export SMTP_FROM_NAME="${SMTP_FROM_NAME:-AI Paper Summary}"
+          export SMTP_USE_STARTTLS="${SMTP_USE_STARTTLS:-true}"
+          export SMTP_USE_SSL="${SMTP_USE_SSL:-false}"
+          export SEMANTIC_SCHOLAR_TIMEOUT_SECONDS="${SEMANTIC_SCHOLAR_TIMEOUT_SECONDS:-5}"
+          export CRAWLER_CITATION_MAX_WORKERS="${CRAWLER_CITATION_MAX_WORKERS:-16}"
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from string import Template
+
+          template_path = Path("deploy/linux/backend.env.production.template")
+          rendered_path = Path("backend.env.rendered")
+          content = Template(template_path.read_text(encoding="utf-8")).safe_substitute(os.environ)
+          if "${" in content:
+              raise SystemExit("Unresolved placeholders remain in backend.env.production.template")
+          rendered_path.write_text(content, encoding="utf-8")
+          PY
+          chmod 600 backend.env.rendered
+
+      - name: Upload rendered env to server
+        run: |
+          set -euo pipefail
+          scp -i "${HOME}/.ssh/deploy_key" -P "${DEPLOY_PORT}" backend.env.rendered "${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/ai-paper-summary.backend.env"
+
+      - name: Deploy to production server
+        run: |
+          set -euo pipefail
+          ssh -i "${HOME}/.ssh/deploy_key" -p "${DEPLOY_PORT}" "${DEPLOY_USER}@${DEPLOY_HOST}" 'bash -se' <<'REMOTE' 2>&1 | tee "${RUNNER_TEMP}/deploy.log"
+          set -euo pipefail
+          cd /srv/ai-paper-summary
+          git fetch origin main
+          git checkout main
+          git pull --ff-only origin main
+          if [ ! -x backend/venv/bin/python ]; then
+            python3 -m venv backend/venv
+          fi
+          if [ -f backend/.env ]; then
+            cp backend/.env "backend/.env.bak.$(date +%Y%m%d%H%M%S)"
+          fi
+          install -m 600 /tmp/ai-paper-summary.backend.env backend/.env
+          rm -f /tmp/ai-paper-summary.backend.env
+          cd backend
+          venv/bin/pip install -r requirements.txt
+          venv/bin/python -c "import sys; from app.core.config import settings; required = {'DATABASE_URL': settings.DATABASE_URL.strip(), 'BACKEND_PUBLIC_URL': settings.BACKEND_PUBLIC_URL.strip(), 'FRONTEND_URL': settings.FRONTEND_URL.strip(), 'KIMI_MODEL': settings.KIMI_MODEL.strip(), 'SMTP_HOST': settings.SMTP_HOST.strip(), 'SMTP_USERNAME': settings.SMTP_USERNAME.strip(), 'SMTP_PASSWORD': settings.SMTP_PASSWORD.strip(), 'SMTP_FROM_EMAIL': settings.SMTP_FROM_EMAIL.strip(), 'OWNER_ALERT_EMAIL': settings.OWNER_ALERT_EMAIL.strip()}; missing = [name for name, value in required.items() if not value]; llm_api_key = settings.LLM_API_KEY; missing.extend(['MINIMAX_API_KEY or KIMI_API_KEY'] if not llm_api_key else []); sys.exit(f'Missing required settings: {\", \".join(missing)}') if missing else print('Configuration validated.')"
+          venv/bin/python scripts/setup_local_db.py
+          cd ../frontend
+          npm ci
+          npm run build
+          sudo systemctl restart ai-paper-summary-backend
+          curl --fail --silent --show-error http://127.0.0.1:8000/api/v1/papers/calendar >/dev/null
+          curl --fail --silent --show-error -H "Host: arxivdaily.tech" http://127.0.0.1/api/v1/papers/calendar >/dev/null
+          REMOTE
+
+      - name: Upload deploy log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-log
+          path: ${{ runner.temp }}/deploy.log
+          if-no-files-found: ignore

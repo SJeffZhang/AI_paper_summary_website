@@ -407,6 +407,95 @@ cd backend
 ./venv/bin/python scripts/install_linux_cron.py
 ```
 
+## GitHub Actions CI/CD
+
+仓库现在约定使用两条 GitHub Actions workflow：
+
+- `CI`
+  - 触发：`pull_request` 到 `main`、`push` 到 `main`
+  - 内容：
+    - 后端：`tests/backend + tests/smoke`
+    - 外网：`tests/live`
+    - 前端：`npm run test:run` + `npm run build`
+- `Deploy`
+  - 触发：
+    - `CI` 在 `main` 分支的 `push` 成功后自动触发
+    - 或手动 `workflow_dispatch`
+  - 内容：
+    - 通过 SSH 登录现有 Ubuntu 服务器
+    - 更新 `/srv/ai-paper-summary`
+    - 用 GitHub `production` Environment Secrets 渲染并覆盖 `backend/.env`
+    - 执行 `setup_local_db.py`
+    - 重建前端并重启 `ai-paper-summary-backend`
+    - 做本机后端与 `arxivdaily.tech` 入口健康检查
+
+### GitHub Secrets / Environment Secrets
+
+推荐把部署 workflow 绑定到 GitHub `production` Environment，并把敏感值放在该 Environment Secrets 下。
+
+部署连接类：
+
+- `DEPLOY_HOST`
+- `DEPLOY_PORT`
+- `DEPLOY_USER`
+- `DEPLOY_SSH_KEY`
+- `DEPLOY_KNOWN_HOSTS`
+
+业务运行类：
+
+- `DATABASE_URL`
+- `MINIMAX_API_KEY`
+- `KIMI_API_KEY`（可选，兼容旧变量）
+- `BACKEND_PUBLIC_URL`
+- `FRONTEND_URL`
+- `SMTP_HOST`
+- `SMTP_PORT`
+- `SMTP_USERNAME`
+- `SMTP_PASSWORD`
+- `SMTP_FROM_EMAIL`
+- `SMTP_FROM_NAME`
+- `SMTP_USE_STARTTLS`
+- `SMTP_USE_SSL`
+- `OWNER_ALERT_EMAIL`
+
+可选覆盖的运行参数：
+
+- `MYSQL_UNIX_SOCKET`
+- `KIMI_BASE_URL`
+- `KIMI_MODEL`
+- `KIMI_TIMEOUT_SECONDS`
+- `KIMI_LONGFORM_TIMEOUT_SECONDS`
+- `KIMI_MAX_RETRIES`
+- `KIMI_LONGFORM_MAX_RETRIES`
+- `KIMI_TITLE_BATCH_SIZE`
+- `PIPELINE_MAX_CATEGORY_ATTEMPTS`
+- `PIPELINE_FOCUS_ATTEMPT_MULTIPLIER`
+- `PIPELINE_WATCHING_ATTEMPT_MULTIPLIER`
+- `PIPELINE_ENABLE_WATCHING`
+- `PIPELINE_REVIEWER_STRICT`
+- `PIPELINE_PROBE_DAYS`
+- `SEMANTIC_SCHOLAR_TIMEOUT_SECONDS`
+- `CRAWLER_CITATION_MAX_WORKERS`
+
+固定写入 deploy 生成 `.env` 的默认值：
+
+- `KIMI_MIN_REQUEST_INTERVAL_SECONDS=1.5`
+- `KIMI_LONGFORM_MIN_REQUEST_INTERVAL_SECONDS=2.5`
+- `KIMI_TITLE_LOCALIZATION_ATTEMPTS=4`
+- `KIMI_EDITOR_MAX_TOKENS=1400`
+- `KIMI_WRITER_FOCUS_MAX_TOKENS=1800`
+- `KIMI_WRITER_WATCHING_MAX_TOKENS=1300`
+- `KIMI_REVIEWER_MAX_TOKENS=512`
+
+### 运行与安全约束
+
+- `pull_request` 路径不会读取生产 Secrets
+- 生产 `.env` 由 Actions 根据 `deploy/linux/backend.env.production.template` 渲染后覆盖到服务器
+- 服务器上原有 `.env` 会先备份，再写入新版本
+- 若仓库允许外部 fork PR，不要改成 `pull_request_target` 去跑带 Secrets 的逻辑
+- 推荐给 `production` Environment 增加 required reviewers，至少为部署保留一层人工门禁
+- 推荐在 GitHub 仓库设置里把 `backend-tests`、`live-tests`、`frontend-tests` 设为 `main` 的 required checks
+
 ## 测试
 
 ### 后端主回归

@@ -60,13 +60,18 @@ cp .env.example .env
 mkdir -p runtime/logs
 ```
 
-Edit `backend/.env` with the production values:
+Edit `backend/.env` with the production values if you are doing the first bootstrap or manual recovery.
+If GitHub Actions auto-deploy is enabled, the deploy workflow will overwrite `backend/.env`
+from GitHub `production` Environment Secrets on every release.
+
+Manual `.env` baseline:
 
 - `DATABASE_URL=mysql+pymysql://ai_paper_summary:<strong-password>@localhost:3306/ai_paper_summary`
 - `MYSQL_UNIX_SOCKET=`
 - `BACKEND_PUBLIC_URL=http://43.155.154.193`
 - `FRONTEND_URL=http://43.155.154.193`
-- `KIMI_API_KEY=<your-kimi-api-key>`
+- `MINIMAX_API_KEY=<your-minimax-api-key>`
+- `KIMI_API_KEY=<optional-legacy-key>`
 - `SMTP_HOST=smtp.gmail.com`
 - `SMTP_PORT=587`
 - `SMTP_USERNAME=z1332556430@gmail.com`
@@ -193,3 +198,85 @@ sudo tail -n 200 /var/log/nginx/ai-paper-summary.error.log
 tail -n 200 /srv/ai-paper-summary/backend/runtime/logs/daily_update.log
 tail -n 200 /srv/ai-paper-summary/backend/runtime/logs/daily_digest.log
 ```
+
+## 11. GitHub Actions CI/CD
+
+The repository now expects two workflows under `.github/workflows/`:
+
+- `ci.yml`
+  - runs on `pull_request` to `main` and `push` to `main`
+  - executes:
+    - `cd backend && python -m pytest ../tests/backend ../tests/smoke`
+    - `cd backend && python -m pytest ../tests/live`
+    - `cd frontend && npm ci && npm run test:run && npm run build`
+- `deploy.yml`
+  - runs automatically when `CI` succeeds for a `push` on `main`
+  - also supports manual `workflow_dispatch`
+  - connects to the Ubuntu server over SSH
+  - renders `deploy/linux/backend.env.production.template`
+  - uploads the rendered file to `/srv/ai-paper-summary/backend/.env`
+  - updates code, validates config, runs `setup_local_db.py`, rebuilds frontend, restarts `ai-paper-summary-backend`, and performs health checks
+
+Recommended GitHub `production` Environment Secrets:
+
+Connection:
+
+- `DEPLOY_HOST`
+- `DEPLOY_PORT`
+- `DEPLOY_USER`
+- `DEPLOY_SSH_KEY`
+- `DEPLOY_KNOWN_HOSTS`
+
+Runtime:
+
+- `DATABASE_URL`
+- `MINIMAX_API_KEY`
+- `KIMI_API_KEY` (optional legacy fallback)
+- `BACKEND_PUBLIC_URL`
+- `FRONTEND_URL`
+- `SMTP_HOST`
+- `SMTP_PORT`
+- `SMTP_USERNAME`
+- `SMTP_PASSWORD`
+- `SMTP_FROM_EMAIL`
+- `SMTP_FROM_NAME`
+- `SMTP_USE_STARTTLS`
+- `SMTP_USE_SSL`
+- `OWNER_ALERT_EMAIL`
+
+Optional runtime overrides:
+
+- `MYSQL_UNIX_SOCKET`
+- `KIMI_BASE_URL`
+- `KIMI_MODEL`
+- `KIMI_TIMEOUT_SECONDS`
+- `KIMI_LONGFORM_TIMEOUT_SECONDS`
+- `KIMI_MAX_RETRIES`
+- `KIMI_LONGFORM_MAX_RETRIES`
+- `KIMI_TITLE_BATCH_SIZE`
+- `PIPELINE_MAX_CATEGORY_ATTEMPTS`
+- `PIPELINE_FOCUS_ATTEMPT_MULTIPLIER`
+- `PIPELINE_WATCHING_ATTEMPT_MULTIPLIER`
+- `PIPELINE_ENABLE_WATCHING`
+- `PIPELINE_REVIEWER_STRICT`
+- `PIPELINE_PROBE_DAYS`
+- `SEMANTIC_SCHOLAR_TIMEOUT_SECONDS`
+- `CRAWLER_CITATION_MAX_WORKERS`
+
+The deploy workflow writes these production defaults directly and does not read them from GitHub Secrets:
+
+- `KIMI_MIN_REQUEST_INTERVAL_SECONDS=1.5`
+- `KIMI_LONGFORM_MIN_REQUEST_INTERVAL_SECONDS=2.5`
+- `KIMI_TITLE_LOCALIZATION_ATTEMPTS=4`
+- `KIMI_EDITOR_MAX_TOKENS=1400`
+- `KIMI_WRITER_FOCUS_MAX_TOKENS=1800`
+- `KIMI_WRITER_WATCHING_MAX_TOKENS=1300`
+- `KIMI_REVIEWER_MAX_TOKENS=512`
+
+Operational notes:
+
+- The deploy job should be bound to the GitHub `production` Environment.
+- CI jobs must not read production secrets.
+- Do not use `pull_request_target` for code that touches deploy secrets.
+- The workflow backs up the existing `.env` before replacing it.
+- If you want one more manual gate before production, configure required reviewers on the `production` Environment.
