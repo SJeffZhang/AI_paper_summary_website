@@ -971,6 +971,114 @@ def test_run_uses_quantity_first_fallback_when_supply_is_insufficient(db_session
     assert all(summary.category == "focus" for summary in summaries)
 
 
+def test_run_requeues_full_agent_pipeline_after_reviewer_rejections_until_success(db_session, monkeypatch):
+    pipeline = Pipeline(db_session)
+    pipeline.crawler.fetch_papers = lambda fetch_date: [
+        {
+            "arxiv_id": "paper-review-requeue",
+            "title_original": "Reviewer Requeue Paper",
+            "authors": [{"name": "Alice", "affiliation": "OpenAI"}],
+            "venue": "ICLR 2026",
+            "abstract": "A pipeline test abstract",
+            "pdf_url": "https://arxiv.org/pdf/paper-review-requeue.pdf",
+            "upvotes": 42,
+            "arxiv_publish_date": "2026-03-20",
+        }
+    ]
+    pipeline.scorer.score_paper = lambda paper: {
+        "arxiv_id": paper["arxiv_id"],
+        "title_original": paper["title_original"],
+        "authors": paper["authors"],
+        "venue": paper["venue"],
+        "abstract": paper["abstract"],
+        "pdf_url": paper["pdf_url"],
+        "upvotes": paper["upvotes"],
+        "arxiv_publish_date": paper["arxiv_publish_date"],
+        "score": 95,
+        "score_reasons": {"hf_recommend": 30},
+        "direction": "Agent",
+    }
+
+    editor_feedback = []
+    reviewer_calls = {"count": 0}
+
+    pipeline.ai_processor.localize_title = lambda paper: "评审重排论文"
+    pipeline.ai_processor.localize_titles = lambda papers, batch_size=None: {
+        paper["arxiv_id"]: "评审重排论文" for paper in papers
+    }
+
+    def fake_run_editor(papers, category, retry_feedback=None):
+        editor_feedback.append(retry_feedback)
+        return f"editor-output-{len(editor_feedback)}"
+
+    pipeline.ai_processor.run_editor = fake_run_editor
+    pipeline.ai_processor.parse_editor_records = lambda editor_output, papers: [
+        {
+            "arxiv_id": "paper-review-requeue",
+            "writing_angle": "angle",
+            "core_problem": "problem",
+            "solution": "solution",
+            "content": f"editor::{editor_output}",
+        }
+    ]
+    pipeline.ai_processor.run_writer = lambda editor_brief, papers_metadata, category, history=None: "writer-output"
+    pipeline.ai_processor.parse_writer_records = lambda writer_output, papers, category: [
+        {
+            "arxiv_id": "paper-review-requeue",
+            "one_line_summary": "中文总结",
+            "one_line_summary_en": "English summary",
+            "core_highlights": ["亮点1", "亮点2", "亮点3"],
+            "core_highlights_en": ["Point1", "Point2", "Point3"],
+            "application_scenarios": "中文场景",
+            "application_scenarios_en": "English scenario",
+            "content": "## [paper-review-requeue]\n- **一句话总结**: 中文总结",
+        }
+    ]
+
+    def fake_run_reviewer(writer_output):
+        reviewer_calls["count"] += 1
+        if reviewer_calls["count"] <= 3:
+            return {
+                "status": "REJECTED",
+                "rejected_ids": ["paper-review-requeue"],
+                "raw_output": "- **整体结论**: REJECTED\n- **拒绝名单**: [paper-review-requeue]",
+            }
+        return {
+            "status": "PASSED",
+            "rejected_ids": [],
+            "raw_output": "- **整体结论**: PASSED\n- **拒绝名单**: []",
+        }
+
+    pipeline.ai_processor.run_reviewer = fake_run_reviewer
+
+    monkeypatch.setattr(settings, "PIPELINE_ENABLE_WATCHING", False)
+    monkeypatch.setattr(settings, "PIPELINE_REVIEWER_STRICT", True)
+    monkeypatch.setattr(settings, "PIPELINE_REVIEW_REQUEUE_ATTEMPTS", 5)
+
+    pipeline.run("2026-03-23")
+
+    issue_date = Pipeline._resolve_issue_date("2026-03-23")
+    task_log = (
+        db_session.query(SystemTaskLog)
+        .filter(SystemTaskLog.issue_date == issue_date)
+        .one()
+    )
+    summary = (
+        db_session.query(PaperSummary)
+        .join(Paper)
+        .filter(PaperSummary.issue_date == issue_date, Paper.arxiv_id == "paper-review-requeue")
+        .one()
+    )
+
+    assert task_log.status == "SUCCESS"
+    assert task_log.processed_count == 1
+    assert summary.category == "focus"
+    assert summary.one_line_summary == "中文总结"
+    assert editor_feedback[0] is None
+    assert "Reviewer 原始结论如下" in editor_feedback[1]
+    assert reviewer_calls["count"] == 4
+
+
 def test_fetch_with_backtrack_uses_previous_available_date(db_session, monkeypatch):
     pipeline = Pipeline(db_session)
     calls = []
