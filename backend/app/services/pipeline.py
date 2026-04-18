@@ -8,6 +8,7 @@ from app.db.session import SessionLocal
 from app.models.domain import Paper, PaperAITrace, PaperSummary, SystemTaskLog
 from app.services.ai_processor import AIProcessor, StructuredOutputError
 from app.services.crawler import Crawler
+from app.services.notification_service import send_owner_alert, shanghai_today
 from app.services.scorer import Scorer
 from app.core.config import settings
 from app.core.specs import (
@@ -418,29 +419,83 @@ class Pipeline:
         papers: Sequence[Dict[str, Any]],
         category: str,
     ) -> Tuple[List[Dict[str, Any]], List[str]]:
+        max_pipeline_attempts = max(1, int(settings.PIPELINE_REVIEW_REQUEUE_ATTEMPTS or 1))
+        reviewer_retry_feedback: str | None = None
+        last_rejected_ids: List[str] = []
+        last_review_output = ""
+
+        for pipeline_attempt in range(max_pipeline_attempts):
+            parsed_results, rejected_ids, review_output = self._run_ai_batch_once(
+                papers,
+                category,
+                attempt_offset=pipeline_attempt * 100,
+                reviewer_retry_feedback=reviewer_retry_feedback,
+            )
+
+            if not rejected_ids:
+                return parsed_results, []
+
+            last_rejected_ids = list(rejected_ids)
+            last_review_output = review_output
+            if pipeline_attempt >= max_pipeline_attempts - 1:
+                self._send_reviewer_exhausted_alert(
+                    papers=papers,
+                    category=category,
+                    rejected_ids=rejected_ids,
+                    review_output=review_output,
+                    exhausted_attempts=max_pipeline_attempts,
+                )
+                return parsed_results, rejected_ids
+
+            reviewer_retry_feedback = self._build_reviewer_retry_feedback(review_output, rejected_ids)
+            _safe_progress_log(
+                (
+                    f"[pipeline][{category}] reviewer rejected IDs {','.join(rejected_ids) or '-'}; "
+                    f"restarting full agent pipeline {pipeline_attempt + 2}/{max_pipeline_attempts}."
+                )
+            )
+
+        return [], last_rejected_ids
+
+    def _run_ai_batch_once(
+        self,
+        papers: Sequence[Dict[str, Any]],
+        category: str,
+        *,
+        attempt_offset: int = 0,
+        reviewer_retry_feedback: str | None = None,
+    ) -> Tuple[List[Dict[str, Any]], List[str], str]:
         max_retries = 2
         editor_brief = None
         editor_records: List[Dict[str, Any]] = []
 
         for attempt in range(max_retries + 1):
             editor_brief = None
+            trace_attempt_no = attempt_offset + attempt + 1
             try:
-                editor_brief = self.ai_processor.run_editor(papers, category)
+                if reviewer_retry_feedback:
+                    editor_brief = self.ai_processor.run_editor(
+                        papers,
+                        category,
+                        retry_feedback=reviewer_retry_feedback,
+                    )
+                else:
+                    editor_brief = self.ai_processor.run_editor(papers, category)
                 editor_records = self.ai_processor.parse_editor_records(editor_brief, papers)
-                self._record_editor_traces(papers, editor_records, attempt_no=attempt + 1)
+                self._record_editor_traces(papers, editor_records, attempt_no=trace_attempt_no)
                 break
             except StructuredOutputError as exc:
                 self._record_uniform_stage_traces(
                     papers,
                     stage="editor",
                     stage_status="invalid",
-                    attempt_no=attempt + 1,
+                    attempt_no=trace_attempt_no,
                     content=exc.raw_output,
                 )
                 try:
                     editor_brief = self.ai_processor.repair_editor_output(exc.raw_output, papers, category)
                     editor_records = self.ai_processor.parse_editor_records(editor_brief, papers)
-                    self._record_editor_traces(papers, editor_records, attempt_no=attempt + 1)
+                    self._record_editor_traces(papers, editor_records, attempt_no=trace_attempt_no)
                     break
                 except Exception:
                     pass
@@ -452,7 +507,7 @@ class Pipeline:
                         papers,
                         stage="editor",
                         stage_status="invalid",
-                        attempt_no=attempt + 1,
+                        attempt_no=trace_attempt_no,
                         content=editor_brief,
                     )
                 if attempt >= max_retries:
@@ -463,9 +518,11 @@ class Pipeline:
 
         writer_history: List[Dict[str, str]] = []
         last_rejected_ids: List[str] = []
+        last_review_output = ""
 
         for attempt in range(max_retries + 1):
             writer_output = None
+            trace_attempt_no = attempt_offset + attempt + 1
             try:
                 writer_output = self.ai_processor.run_writer(
                     editor_brief=editor_brief,
@@ -474,19 +531,19 @@ class Pipeline:
                     history=writer_history,
                 )
                 writer_records = self.ai_processor.parse_writer_records(writer_output, papers, category)
-                self._record_writer_traces(papers, writer_records, attempt_no=attempt + 1)
+                self._record_writer_traces(papers, writer_records, attempt_no=trace_attempt_no)
             except StructuredOutputError as exc:
                 self._record_uniform_stage_traces(
                     papers,
                     stage="writer",
                     stage_status="invalid",
-                    attempt_no=attempt + 1,
+                    attempt_no=trace_attempt_no,
                     content=exc.raw_output,
                 )
                 try:
                     writer_output = self.ai_processor.repair_writer_output(exc.raw_output, papers, category)
                     writer_records = self.ai_processor.parse_writer_records(writer_output, papers, category)
-                    self._record_writer_traces(papers, writer_records, attempt_no=attempt + 1)
+                    self._record_writer_traces(papers, writer_records, attempt_no=trace_attempt_no)
                 except Exception:
                     if attempt >= max_retries:
                         raise
@@ -503,7 +560,7 @@ class Pipeline:
                         papers,
                         stage="writer",
                         stage_status="invalid",
-                        attempt_no=attempt + 1,
+                        attempt_no=trace_attempt_no,
                         content=writer_output,
                     )
                 if attempt >= max_retries:
@@ -523,8 +580,9 @@ class Pipeline:
                     papers,
                     review_output=review_result["raw_output"],
                     rejected_ids=rejected_ids,
-                    attempt_no=attempt + 1,
+                    attempt_no=trace_attempt_no,
                 )
+                last_review_output = review_result["raw_output"]
                 parsed_results = [
                     {
                         "arxiv_id": record["arxiv_id"],
@@ -540,7 +598,7 @@ class Pipeline:
                 ]
 
                 if review_result["status"] == "PASSED":
-                    return parsed_results, []
+                    return parsed_results, [], review_result["raw_output"]
 
                 last_rejected_ids = rejected_ids
                 if not settings.PIPELINE_REVIEWER_STRICT:
@@ -561,9 +619,9 @@ class Pipeline:
                             "application_scenarios_en": record["application_scenarios_en"],
                         }
                         for record in writer_records
-                    ], []
+                    ], [], review_result["raw_output"]
                 if attempt >= max_retries:
-                    return parsed_results, rejected_ids
+                    return parsed_results, rejected_ids, review_result["raw_output"]
 
                 writer_history.extend(
                     [
@@ -583,7 +641,7 @@ class Pipeline:
                     papers,
                     stage="reviewer",
                     stage_status="invalid",
-                    attempt_no=attempt + 1,
+                    attempt_no=trace_attempt_no,
                     content=exc.raw_output,
                 )
                 if not settings.PIPELINE_REVIEWER_STRICT:
@@ -604,7 +662,7 @@ class Pipeline:
                             "application_scenarios_en": record["application_scenarios_en"],
                         }
                         for record in writer_records
-                    ], []
+                    ], [], exc.raw_output
                 try:
                     review_result = self.ai_processor.repair_reviewer_output(exc.raw_output, writer_output)
                     rejected_ids = review_result["rejected_ids"] if review_result["status"] == "REJECTED" else []
@@ -612,8 +670,9 @@ class Pipeline:
                         papers,
                         review_output=review_result["raw_output"],
                         rejected_ids=rejected_ids,
-                        attempt_no=attempt + 1,
+                        attempt_no=trace_attempt_no,
                     )
+                    last_review_output = review_result["raw_output"]
                     parsed_results = [
                         {
                             "arxiv_id": record["arxiv_id"],
@@ -628,7 +687,7 @@ class Pipeline:
                         if record["arxiv_id"] not in set(rejected_ids)
                     ]
                     if review_result["status"] == "PASSED":
-                        return parsed_results, []
+                        return parsed_results, [], review_result["raw_output"]
 
                     last_rejected_ids = rejected_ids
                     if not settings.PIPELINE_REVIEWER_STRICT:
@@ -649,9 +708,9 @@ class Pipeline:
                                 "application_scenarios_en": record["application_scenarios_en"],
                             }
                             for record in writer_records
-                        ], []
+                        ], [], review_result["raw_output"]
                     if attempt >= max_retries:
-                        return parsed_results, rejected_ids
+                        return parsed_results, rejected_ids, review_result["raw_output"]
 
                     writer_history.extend(
                         [
@@ -695,7 +754,7 @@ class Pipeline:
                             "application_scenarios_en": record["application_scenarios_en"],
                         }
                         for record in writer_records
-                    ], []
+                    ], [], last_review_output
                 if attempt >= max_retries:
                     raise
                 writer_history.append(
@@ -705,7 +764,59 @@ class Pipeline:
                     }
                 )
 
-        return [], last_rejected_ids
+        return [], last_rejected_ids, last_review_output
+
+    @staticmethod
+    def _build_reviewer_retry_feedback(review_output: str, rejected_ids: Sequence[str]) -> str:
+        rejected_label = ", ".join(rejected_ids) or "-"
+        review_output = str(review_output or "").strip()
+        sections = [
+            "上一轮完整 agent 管线没有通过 Reviewer。",
+            f"被拒绝的 arxiv_id: {rejected_label}",
+            "请重新执行完整的 Editor -> Writer -> Reviewer 三阶段，并优先修复 Reviewer 指出的质量问题。",
+        ]
+        if review_output:
+            sections.extend(["", "Reviewer 原始结论如下：", review_output])
+        return "\n".join(sections)
+
+    def _send_reviewer_exhausted_alert(
+        self,
+        *,
+        papers: Sequence[Dict[str, Any]],
+        category: str,
+        rejected_ids: Sequence[str],
+        review_output: str,
+        exhausted_attempts: int,
+    ) -> None:
+        summary = papers[0].get("_summary") if papers else None
+        issue_date = getattr(summary, "issue_date", None)
+        paper_ids = [paper["arxiv_id"] for paper in papers]
+        subject = (
+            "[AI Paper Summary] Reviewer exhausted after "
+            f"{exhausted_attempts} full attempts: {', '.join(paper_ids)}"
+        )
+        text_body = (
+            "以下论文在 Reviewer 拒绝后重新进入完整 agent 管线，"
+            f"但连续失败 {exhausted_attempts} 次，已被降级为 candidate。\n"
+            f"issue_date: {issue_date.isoformat() if isinstance(issue_date, date) else issue_date or 'unknown'}\n"
+            f"category: {category}\n"
+            f"paper_ids: {', '.join(paper_ids)}\n"
+            f"rejected_ids: {', '.join(rejected_ids) or '-'}\n\n"
+            "最后一次 Reviewer 输出：\n"
+            f"{review_output or '(empty)'}\n"
+        )
+        try:
+            send_owner_alert(
+                None,
+                run_date=shanghai_today(),
+                issue_date=issue_date if isinstance(issue_date, date) else None,
+                subject=subject,
+                text_body=text_body,
+            )
+        except Exception as exc:  # pragma: no cover - best effort alerting
+            _safe_progress_log(
+                f"[pipeline][{category}] failed to send reviewer exhaustion alert for {','.join(paper_ids)}: {exc}"
+            )
 
     def _record_uniform_stage_traces(
         self,

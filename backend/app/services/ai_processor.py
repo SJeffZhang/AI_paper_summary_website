@@ -175,7 +175,12 @@ class AIProcessor:
         configured_longform = max(1, int(settings.KIMI_LONGFORM_MAX_RETRIES or configured))
         return min(configured, configured_longform)
 
-    def run_editor(self, locked_papers: Sequence[Dict[str, Any]], category: str) -> str:
+    def run_editor(
+        self,
+        locked_papers: Sequence[Dict[str, Any]],
+        category: str,
+        retry_feedback: Optional[str] = None,
+    ) -> str:
         input_text = [f"# Locked {category.title()} Batch", "", "系统已锁定以下论文，请逐篇生成定调：", ""]
         for paper in locked_papers:
             input_text.extend(
@@ -185,6 +190,18 @@ class AIProcessor:
                     f"- 分数: {paper['score']}",
                     f"- 方向: {paper['direction']}",
                     f"- 摘要: {self._truncate_abstract(paper['abstract'])}",
+                    "",
+                ]
+            )
+
+        if retry_feedback:
+            input_text.extend(
+                [
+                    "# 上一轮 Reviewer 反馈",
+                    "",
+                    retry_feedback.strip(),
+                    "",
+                    "请重新生成完整定调，重点修复 Reviewer 指出的薄弱点，同时保持严格输出格式。",
                     "",
                 ]
             )
