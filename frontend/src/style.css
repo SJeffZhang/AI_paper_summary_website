@@ -1,31 +1,346 @@
-/* 
-  Global Styles for AI Paper Summary Website
-  Cleaned from default Vite template styles to avoid conflicts
-*/
+:root {
+  --page-bg: #f4eee3;
+  --page-bg-soft: #efe7d9;
+  --panel-bg: rgba(255, 251, 244, 0.68);
+  --panel-strong: rgba(255, 251, 244, 0.82);
+  --panel-contrast: rgba(240, 228, 210, 0.74);
+  --ink-strong: #221d17;
+  --ink-body: #433a31;
+  --ink-muted: #77695c;
+  --line-soft: rgba(83, 69, 54, 0.14);
+  --line-strong: rgba(83, 69, 54, 0.24);
+  --accent: #c46f3c;
+  --accent-deep: #9b5429;
+  --accent-soft: rgba(196, 111, 60, 0.12);
+  --focus-tone: #a94e27;
+  --watch-tone: #6d6658;
+  --candidate-tone: #8c7662;
+  --success-tone: #56705f;
+  --danger-tone: #8a4b42;
+  --shadow-soft: 0 24px 80px rgba(65, 52, 39, 0.08);
+  --shadow-card: 0 16px 40px rgba(65, 52, 39, 0.06);
+  --shadow-hover: 0 22px 48px rgba(65, 52, 39, 0.12);
+  --glass-blur: 22px;
+  --glass-blur-strong: 30px;
+  --glass-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.06));
+  --radius-xl: 32px;
+  --radius-lg: 24px;
+  --radius-md: 18px;
+  --radius-sm: 12px;
+  --font-ui: "Avenir Next", "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-display: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  --motion-fast: 160ms;
+  --motion-smooth: 260ms;
+  --motion-slower: 420ms;
+  --ease-smooth: cubic-bezier(0.22, 1, 0.36, 1);
+  --lift-scale: 1.018;
+  --lift-y: -2px;
+  --tap-scale: 0.992;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  background:
+    radial-gradient(circle at top left, rgba(196, 111, 60, 0.12), transparent 30%),
+    linear-gradient(180deg, #f7f1e7 0%, #efe6d7 100%);
+}
 
 body {
   margin: 0;
-  font-family: "Helvetica Neue", Helvetica, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "微软雅黑", Arial, sans-serif;
-  background-color: #f5f7fa;
-  color: #303133;
+  min-width: 320px;
+  background: transparent;
+  color: var(--ink-body);
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body::selection {
+  background: rgba(196, 111, 60, 0.18);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
 }
 
 #app {
-  width: 100%;
   min-height: 100vh;
 }
 
-/* Reset link styles */
-a {
-  text-decoration: none;
-  color: inherit;
+.surface-panel {
+  position: relative;
+  border: 1px solid var(--line-soft);
+  background:
+    var(--glass-sheen),
+    var(--panel-bg);
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
 }
 
-a:hover {
-  color: #409eff;
+.surface-panel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.16), transparent 42%);
 }
 
-/* Common layout constraints */
-* {
-  box-sizing: border-box;
+.interactive-lift,
+.interactive-press {
+  transition:
+    transform var(--motion-smooth) var(--ease-smooth),
+    box-shadow var(--motion-smooth) var(--ease-smooth),
+    border-color var(--motion-fast) ease,
+    background-color var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    opacity var(--motion-fast) ease;
+  transform-origin: center;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .interactive-lift:hover {
+    transform: translateY(var(--lift-y)) scale(var(--lift-scale));
+    box-shadow: var(--shadow-hover);
+    border-color: rgba(196, 111, 60, 0.22);
+  }
+}
+
+.interactive-press:active,
+.interactive-lift:active {
+  transform: scale(var(--tap-scale));
+}
+
+.eyebrow {
+  margin: 0;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+
+.serif-title {
+  font-family: var(--font-display);
+  letter-spacing: -0.03em;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(255, 250, 242, 0.74);
+  border: 1px solid var(--line-soft);
+  color: var(--ink-body);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.chip strong {
+  color: var(--ink-strong);
+}
+
+.focus-chip {
+  color: var(--focus-tone);
+  border-color: rgba(169, 78, 39, 0.2);
+  background: rgba(169, 78, 39, 0.08);
+}
+
+.watching-chip {
+  color: var(--watch-tone);
+  border-color: rgba(109, 102, 88, 0.22);
+  background: rgba(109, 102, 88, 0.08);
+}
+
+.candidate-chip {
+  color: var(--candidate-tone);
+  border-color: rgba(140, 118, 98, 0.24);
+  background: rgba(140, 118, 98, 0.1);
+}
+
+.app-link {
+  color: var(--accent-deep);
+}
+
+.app-link:hover {
+  color: var(--accent);
+}
+
+.primary-button,
+.secondary-button,
+.tertiary-button {
+  appearance: none;
+  position: relative;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  padding: 12px 18px;
+  cursor: pointer;
+  transition:
+    transform var(--motion-smooth) var(--ease-smooth),
+    box-shadow var(--motion-smooth) var(--ease-smooth),
+    background-color var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    border-color var(--motion-fast) ease;
+}
+
+.primary-button::before,
+.secondary-button::before,
+.tertiary-button::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.02));
+  opacity: 0.9;
+}
+
+.primary-button:hover,
+.secondary-button:hover,
+.tertiary-button:hover {
+  transform: translateY(-1px);
+}
+
+.primary-button > *,
+.secondary-button > *,
+.tertiary-button > * {
+  position: relative;
+  z-index: 1;
+}
+
+.primary-button {
+  border: 1px solid rgba(34, 29, 23, 0.92);
+  background: #221d17;
+  color: #fffaf2;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.18),
+    0 10px 22px rgba(34, 29, 23, 0.12);
+}
+
+.secondary-button {
+  background: rgba(255, 250, 242, 0.82);
+  color: var(--ink-strong);
+  border: 1px solid var(--line-soft);
+}
+
+.tertiary-button {
+  background: rgba(255, 250, 242, 0.45);
+  color: var(--ink-body);
+  border: 1px solid rgba(83, 69, 54, 0.1);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .primary-button:hover {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.1),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.16),
+      0 14px 26px rgba(34, 29, 23, 0.16);
+  }
+}
+
+.el-button {
+  border-radius: 999px;
+  font-family: var(--font-ui);
+}
+
+.el-dialog {
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background:
+    var(--glass-sheen),
+    rgba(255, 250, 242, 0.9);
+  box-shadow: 0 28px 80px rgba(34, 29, 23, 0.18);
+  backdrop-filter: blur(var(--glass-blur-strong));
+  -webkit-backdrop-filter: blur(var(--glass-blur-strong));
+}
+
+.el-dialog__header {
+  margin-right: 0;
+  padding: 24px 24px 0;
+}
+
+.el-dialog__body {
+  padding: 18px 24px 20px;
+}
+
+.el-dialog__footer {
+  padding: 0 24px 24px;
+}
+
+.el-overlay {
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.el-input__wrapper {
+  border-radius: 14px;
+  box-shadow: none !important;
+  background: rgba(247, 240, 228, 0.92);
+}
+
+.el-empty {
+  padding: 48px 0;
+}
+
+.el-skeleton {
+  --el-skeleton-color: rgba(97, 79, 59, 0.08);
+  --el-skeleton-to-color: rgba(97, 79, 59, 0.16);
+}
+
+.el-pagination.is-background .btn-prev,
+.el-pagination.is-background .btn-next,
+.el-pagination.is-background .el-pager li {
+  border-radius: 999px;
+}
+
+.mobile-only {
+  display: none !important;
+}
+
+@media (max-width: 860px) {
+  .mobile-only {
+    display: block !important;
+  }
+
+  .desktop-only {
+    display: none !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .interactive-lift:hover,
+  .interactive-lift:active,
+  .interactive-press:active,
+  .primary-button:hover,
+  .secondary-button:hover,
+  .tertiary-button:hover {
+    transform: none !important;
+    box-shadow: inherit !important;
+  }
 }

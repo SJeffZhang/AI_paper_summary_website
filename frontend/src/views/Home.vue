@@ -1,168 +1,281 @@
 <template>
-  <div class="home-page">
-    <div class="page-header">
-      <div class="header-copy">
-        <h2 v-if="lang === 'cn'">最新简报</h2>
-        <h2 v-else>Latest Briefings</h2>
-        <p class="subtitle">
+  <div class="brief-home">
+    <section class="hero-band surface-panel">
+      <div class="hero-copy">
+        <p class="eyebrow">{{ lang === 'cn' ? 'Frontier AI editorial brief' : 'Frontier AI editorial brief' }}</p>
+        <h1 class="hero-title serif-title">
+          {{
+            lang === 'cn'
+              ? '每天只留下真正值得点开的那几篇。'
+              : 'A calmer read on the few AI papers that are actually worth opening.'
+          }}
+        </h1>
+        <p class="hero-summary">
           {{ lang === 'cn'
             ? '每日从数百篇前沿AI论文中产出最多5篇Focus与最多12篇Watching，实际数量取决于当日供给与生成结果。每页仅展示一天内容。右侧日历可快速跳转；无数据日期会显示为灰色。'
             : 'Each issue produces up to 5 Focus papers and up to 12 Watching papers from hundreds of frontier AI papers, and the actual count depends on daily supply and generation results. Each page shows one issue date only. Use the calendar on the right for quick jumps; dates without data are shown in gray.' }}
         </p>
-      </div>
-      <el-button class="topics-entry-button" type="primary" plain @click="goToTopics">
-        {{ lang === 'cn' ? '进入论文分类' : 'Browse Categories' }}
-      </el-button>
-    </div>
-
-    <div class="home-layout">
-      <section class="day-panel">
-        <el-divider content-position="left">
-          <span class="group-date">{{ selectedDate || '--' }}</span>
-          <el-link
-            v-if="selectedDate"
-            :underline="false"
-            class="source-link"
+        <div class="hero-actions">
+          <button class="primary-button" type="button" @click="goToTopics">
+            {{ lang === 'cn' ? '进入论文分类' : 'Browse Categories' }}
+          </button>
+          <button
+            class="secondary-button"
+            type="button"
+            :disabled="!selectedDate"
             @click="goToSources(selectedDate)"
           >
             {{ lang === 'cn' ? '查看原始候选池' : 'View Candidate Pool' }}
-          </el-link>
-        </el-divider>
+          </button>
+        </div>
+      </div>
+
+      <div class="hero-poster interactive-lift">
+        <p class="eyebrow">{{ lang === 'cn' ? '当期概览' : 'Issue overview' }}</p>
+        <div class="poster-date serif-title">{{ selectedDate || '--' }}</div>
+        <div class="poster-metrics">
+          <div class="poster-metric interactive-lift">
+            <span>{{ lang === 'cn' ? 'Focus' : 'Focus' }}</span>
+            <strong>{{ focusCount }}</strong>
+          </div>
+          <div class="poster-metric interactive-lift">
+            <span>{{ lang === 'cn' ? 'Watching' : 'Watching' }}</span>
+            <strong>{{ watchingCount }}</strong>
+          </div>
+          <div class="poster-metric interactive-lift">
+            <span>{{ lang === 'cn' ? '候选池' : 'Candidate pool' }}</span>
+            <strong>{{ candidateCount }}</strong>
+          </div>
+        </div>
+        <p class="poster-note">
+          {{
+            lang === 'cn'
+              ? '重点摘要偏深读，Watching 更像值得继续盯的信号面板。'
+              : 'Focus is optimized for deep reading; Watching works more like a curated signal board.'
+          }}
+        </p>
+      </div>
+    </section>
+
+    <div class="home-layout">
+      <section class="main-rail">
+        <div class="section-header">
+          <div>
+            <p class="eyebrow">Focus</p>
+            <h2 class="section-title serif-title">{{ lang === 'cn' ? '当天最值得读的内容' : 'The day’s strongest reads' }}</h2>
+          </div>
+          <p class="section-caption">{{ selectedDate || '--' }}</p>
+        </div>
 
         <div v-if="loading" class="loading-state">
-          <el-skeleton :rows="6" animated />
-          <el-skeleton :rows="4" animated style="margin-top: 20px" />
+          <el-skeleton :rows="8" animated />
         </div>
 
-        <div v-else-if="!selectedGroup.focus.length && !selectedGroup.watching.length" class="empty-state">
-          <el-empty :description="lang === 'cn' ? `当天暂无可展示内容（${selectedDate || '未选择日期'}）` : `No displayable briefs for ${selectedDate || 'selected date'}`" />
+        <div v-else-if="!selectedGroup.focus.length && !selectedGroup.watching.length" class="empty-state surface-panel">
+          <p class="eyebrow">{{ lang === 'cn' ? '当前日期' : 'Selected date' }}</p>
+          <h3 class="serif-title">
+            {{ lang === 'cn' ? '当天暂无可展示内容。' : 'There is no displayable brief for this issue date.' }}
+          </h3>
+          <p>
+            {{
+              lang === 'cn'
+                ? '可以在右侧日历切换到其他日期。'
+                : 'Use the calendar rail on the right to move to another issue.'
+            }}
+          </p>
         </div>
 
-        <div v-else class="paper-feed">
-          <div class="focus-section">
-            <div class="section-title">
-              <el-tag type="danger" effect="dark" round>Focus</el-tag>
-              <span class="title-text">{{ lang === 'cn' ? '重点关注' : 'Top Recommendations' }}</span>
+        <div v-else class="focus-stories">
+          <article
+            v-for="paper in selectedGroup.focus"
+            :key="paper.id"
+            class="focus-story surface-panel interactive-lift"
+          >
+            <div class="story-topline">
+              <div class="story-tags">
+                <span class="chip focus-chip">Focus</span>
+                <button
+                  type="button"
+                  class="chip direction-chip"
+                  @click.stop="goToTopic(paper.direction)"
+                >
+                  {{ paper.direction }}
+                </button>
+              </div>
+              <div class="story-score">
+                <span class="score-label">{{ lang === 'cn' ? '评分' : 'Score' }}</span>
+                <strong>{{ paper.score }}</strong>
+              </div>
             </div>
 
-            <el-card
-              v-for="paper in selectedGroup.focus"
-              :key="paper.id"
-              class="paper-card focus-card"
-              shadow="hover"
-            >
-              <template #header>
-                <div class="card-header">
-                  <div class="title-area">
-                    <el-tag size="small" effect="plain" class="direction-tag">{{ paper.direction }}</el-tag>
-                    <h3 class="paper-title" @click="goToDetail(paper.id)">
-                      {{ lang === 'cn' ? paper.title_zh : paper.title_original }}
-                    </h3>
-                  </div>
-                  <div class="score-badge">
-                    <span class="score-val">{{ paper.score }}</span>
-                    <span class="score-label">PTS</span>
-                  </div>
-                </div>
-              </template>
+            <h3 class="story-title serif-title" @click="goToDetail(paper.id)">
+              {{ lang === 'cn' ? paper.title_zh : paper.title_original }}
+            </h3>
 
-              <div class="paper-content">
-                <div class="summary-box">
-                  <p class="one-line">{{ lang === 'cn' ? paper.one_line_summary : paper.one_line_summary_en }}</p>
-                </div>
-              </div>
+            <p class="story-summary">
+              {{ lang === 'cn' ? paper.one_line_summary : paper.one_line_summary_en }}
+            </p>
 
-              <div class="card-footer">
-                <el-button type="primary" @click="goToDetail(paper.id)">
-                  {{ lang === 'cn' ? '解读全文' : 'Read Full Brief' }}
-                </el-button>
-                <el-link :href="'https://arxiv.org/abs/' + paper.arxiv_id" target="_blank" type="info" :underline="false">
-                  arXiv:{{ paper.arxiv_id }}
-                </el-link>
-              </div>
-            </el-card>
+            <div class="story-signals">
+              <span
+                v-for="[key, value] in getSignalEntries(paper.score_reasons).slice(0, 3)"
+                :key="key"
+                class="chip"
+              >
+                <strong>{{ formatReason(key) }}</strong> +{{ value }}
+              </span>
+            </div>
+
+            <div class="story-actions">
+              <button class="primary-button" type="button" @click="goToDetail(paper.id)">
+                {{ lang === 'cn' ? '进入解读' : 'Read brief' }}
+              </button>
+              <a
+                class="story-link app-link"
+                :href="'https://arxiv.org/abs/' + paper.arxiv_id"
+                target="_blank"
+                rel="noreferrer"
+              >
+                arXiv: {{ paper.arxiv_id }}
+              </a>
+            </div>
+          </article>
+        </div>
+
+        <div v-if="selectedGroup.watching.length" class="watching-block">
+          <div class="section-header section-header-tight">
+            <div>
+              <p class="eyebrow">Watching</p>
+              <h2 class="section-title serif-title">{{ lang === 'cn' ? '还值得继续盯的信号' : 'Signals still worth tracking' }}</h2>
+            </div>
+            <p class="section-caption">{{ watchingCount }}</p>
           </div>
 
-          <div v-if="selectedGroup.watching.length > 0" class="watching-section">
-            <div class="section-title">
-              <el-tag type="info" effect="dark" round>Watching</el-tag>
-              <span class="title-text">{{ lang === 'cn' ? '也值得关注' : 'Also Worth Watching' }}</span>
-            </div>
-
-            <div class="watching-list">
-              <div
-                v-for="paper in selectedGroup.watching"
-                :key="paper.id"
-                class="watching-item"
-                @click="goToDetail(paper.id)"
-              >
-                <div class="wi-header">
-                  <span class="wi-direction">[{{ paper.direction }}]</span>
-                  <span class="wi-title">{{ lang === 'cn' ? paper.title_zh : paper.title_original }}</span>
-                  <span class="wi-score">{{ paper.score }}</span>
-                </div>
-                <p class="wi-summary">{{ lang === 'cn' ? paper.one_line_summary : paper.one_line_summary_en }}</p>
+          <div class="watching-ledger surface-panel">
+            <article
+              v-for="paper in selectedGroup.watching"
+              :key="paper.id"
+              class="watching-row interactive-lift"
+              @click="goToDetail(paper.id)"
+            >
+              <div class="watching-meta">
+                <button
+                  type="button"
+                  class="watching-direction"
+                  @click.stop="goToTopic(paper.direction)"
+                >
+                  {{ paper.direction }}
+                </button>
+                <strong class="watching-score">{{ paper.score }}</strong>
               </div>
-            </div>
+              <div class="watching-copy">
+                <h3>{{ lang === 'cn' ? paper.title_zh : paper.title_original }}</h3>
+                <p>{{ lang === 'cn' ? paper.one_line_summary : paper.one_line_summary_en }}</p>
+              </div>
+            </article>
           </div>
         </div>
       </section>
 
-      <aside class="calendar-panel">
-        <div class="calendar-header">
-          <button
-            type="button"
-            class="month-switch"
-            :disabled="!canGoPrevMonth"
-            @click="goPrevMonth"
-          >
-            ‹
-          </button>
-          <span class="month-label">{{ monthLabel }}</span>
-          <button
-            type="button"
-            class="month-switch"
-            :disabled="!canGoNextMonth"
-            @click="goNextMonth"
-          >
-            ›
-          </button>
-        </div>
+      <aside class="side-rail">
+        <details class="rail-disclosure" open>
+          <summary class="rail-summary mobile-only">
+            <span>{{ lang === 'cn' ? '阅读导航' : 'Reading guide' }}</span>
+          </summary>
+          <section class="rail-card surface-panel interactive-lift">
+            <p class="eyebrow">{{ lang === 'cn' ? '阅读导航' : 'Reading guide' }}</p>
+            <h3 class="rail-title serif-title">{{ lang === 'cn' ? '从这里开始读' : 'Start here' }}</h3>
+            <ul class="rail-list">
+              <li>{{ lang === 'cn' ? '先看 Focus，这是我们认为当天最值得投入时间的内容。' : 'Start with Focus for the pieces most worth your time today.' }}</li>
+              <li>{{ lang === 'cn' ? '再看 Watching，快速补齐那些还没到重点解读、但已经值得关注的论文。' : 'Then move to Watching to catch the papers that deserve attention even if they are not full reads yet.' }}</li>
+              <li>{{ lang === 'cn' ? '如果你想追溯筛选过程，可以去候选池看当天纳入视野的更多论文。' : 'If you want the wider source picture, open the candidate pool to review the broader set considered that day.' }}</li>
+            </ul>
+          </section>
+        </details>
 
-        <div class="weekday-row">
-          <span v-for="weekday in weekdayLabels" :key="weekday" class="weekday-label">{{ weekday }}</span>
-        </div>
+        <details class="rail-disclosure" open>
+          <summary class="rail-summary mobile-only">
+            <span>{{ lang === 'cn' ? '日期日历' : 'Issue calendar' }}</span>
+          </summary>
+          <section class="rail-card surface-panel interactive-lift">
+            <div class="calendar-header">
+              <button
+                type="button"
+                class="month-switch interactive-press"
+                :disabled="!canGoPrevMonth"
+                @click="goPrevMonth"
+              >
+                ‹
+              </button>
+              <span class="month-label">{{ monthLabel }}</span>
+              <button
+                type="button"
+                class="month-switch interactive-press"
+                :disabled="!canGoNextMonth"
+                @click="goNextMonth"
+              >
+                ›
+              </button>
+            </div>
 
-        <div class="calendar-grid">
-          <button
-            v-for="cell in calendarCells"
-            :key="cell.key"
-            type="button"
-            class="calendar-cell"
-            :class="{
-              empty: !cell.dateKey,
-              selected: cell.isSelected,
-              'has-data': cell.hasData,
-              'no-data': cell.dateKey && !cell.hasData,
-              disabled: !cell.inRange,
-            }"
-            :disabled="!cell.dateKey || !cell.inRange || loading"
-            @click="selectDate(cell.dateKey)"
-          >
-            <span v-if="cell.dateKey">{{ cell.day }}</span>
-          </button>
-        </div>
+            <div class="weekday-row">
+              <span v-for="weekday in weekdayLabels" :key="weekday" class="weekday-label">{{ weekday }}</span>
+            </div>
 
-        <div class="calendar-legend">
-          <span class="legend-item">
-            <span class="legend-dot has-data-dot" />
-            {{ lang === 'cn' ? '有数据' : 'Has Data' }}
-          </span>
-          <span class="legend-item">
-            <span class="legend-dot no-data-dot" />
-            {{ lang === 'cn' ? '无数据' : 'No Data' }}
-          </span>
-        </div>
+            <div class="calendar-grid">
+              <button
+                v-for="cell in calendarCells"
+                :key="cell.key"
+                type="button"
+                class="calendar-cell interactive-press"
+                :class="{
+                  empty: !cell.dateKey,
+                  selected: cell.isSelected,
+                  'has-data': cell.hasData,
+                  'no-data': cell.dateKey && !cell.hasData,
+                  disabled: !cell.inRange,
+                }"
+                :disabled="!cell.dateKey || !cell.inRange || loading"
+                @click="selectDate(cell.dateKey)"
+              >
+                <span v-if="cell.dateKey">{{ cell.day }}</span>
+              </button>
+            </div>
+
+            <div class="calendar-legend">
+              <span class="legend-item">
+                <span class="legend-dot has-data-dot" />
+                {{ lang === 'cn' ? '有数据' : 'Has data' }}
+              </span>
+              <span class="legend-item">
+                <span class="legend-dot no-data-dot" />
+                {{ lang === 'cn' ? '无数据' : 'No data' }}
+              </span>
+            </div>
+          </section>
+        </details>
+
+        <details class="rail-disclosure" open>
+          <summary class="rail-summary mobile-only">
+            <span>{{ lang === 'cn' ? '近期日期' : 'Recent issues' }}</span>
+          </summary>
+          <section class="rail-card surface-panel interactive-lift">
+            <p class="eyebrow">{{ lang === 'cn' ? '近期日期' : 'Recent issues' }}</p>
+            <div class="recent-issues">
+              <button
+                v-for="day in recentContentDays"
+                :key="day.issue_date"
+                type="button"
+                class="recent-issue interactive-lift"
+                :class="{ active: day.issue_date === selectedDate }"
+                @click="selectDate(day.issue_date)"
+              >
+                <span>{{ day.issue_date }}</span>
+                <strong>{{ day.paper_count }}</strong>
+              </button>
+            </div>
+          </section>
+        </details>
       </aside>
     </div>
   </div>
@@ -171,6 +284,7 @@
 <script setup>
 import { computed, inject, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+
 import { getPapers, getPapersCalendar } from '../api/papers'
 
 const lang = inject('lang')
@@ -202,6 +316,21 @@ const dateStateMap = computed(() => {
   })
   return map
 })
+
+const focusCount = computed(() => selectedGroup.value.focus.length)
+const watchingCount = computed(() => selectedGroup.value.watching.length)
+const candidateCount = computed(() => {
+  const currentDay = dateStateMap.value.get(selectedDate.value)
+  if (!currentDay) return 0
+  return Math.max((currentDay.paper_count || 0) - focusCount.value - watchingCount.value, 0)
+})
+
+const recentContentDays = computed(() => (
+  calendarDays.value
+    .filter((day) => day.has_content)
+    .slice(-4)
+    .reverse()
+))
 
 const monthLabel = computed(() => {
   if (!calendarMonth.value) return '--'
@@ -299,6 +428,24 @@ function buildSelectedGroup(items, dateKey) {
   return { date: dateKey, focus, watching }
 }
 
+function getSignalEntries(scoreReasons) {
+  return Object.entries(scoreReasons || {}).sort((left, right) => right[1] - left[1])
+}
+
+function formatReason(key) {
+  const map = {
+    top_org: lang.value === 'cn' ? '顶尖机构' : 'Top org',
+    hf_recommend: lang.value === 'cn' ? 'HF 推荐' : 'HF daily',
+    community_popularity: lang.value === 'cn' ? '社区热度' : 'Popularity',
+    top_conf: lang.value === 'cn' ? '顶会' : 'Top conf',
+    has_code: lang.value === 'cn' ? '代码' : 'Code',
+    practitioner_relevance: lang.value === 'cn' ? '工程相关' : 'Practical',
+    academic_influence: lang.value === 'cn' ? '引用影响' : 'Citations',
+    os_trending: lang.value === 'cn' ? '开源热度' : 'Trending',
+  }
+  return map[key] || key
+}
+
 async function fetchCalendar() {
   try {
     const calendar = await getPapersCalendar()
@@ -376,6 +523,11 @@ function goToTopics() {
   router.push('/topics')
 }
 
+function goToTopic(topicKey) {
+  if (!topicKey) return
+  router.push(`/topic/${encodeURIComponent(topicKey)}`)
+}
+
 onMounted(() => {
   fetchCalendar()
 })
@@ -393,28 +545,101 @@ watch(() => route.query.date, (newDate) => {
 </script>
 
 <style scoped>
-.page-header {
+.brief-home {
   display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 24px;
+  flex-direction: column;
+  gap: 32px;
 }
 
-.header-copy h2 {
-  margin: 0;
-  color: #303133;
-  font-size: 24px;
+.hero-band,
+.focus-story,
+.rail-card,
+.watching-ledger,
+.empty-state {
+  border-radius: var(--radius-xl);
 }
 
-.subtitle {
-  margin: 8px 0 0 0;
-  color: #909399;
-  font-size: 15px;
+.hero-band {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.9fr);
+  gap: 28px;
+  padding: 34px;
 }
 
-.topics-entry-button {
-  flex-shrink: 0;
-  margin-left: 16px;
+.hero-title {
+  margin: 16px 0 0;
+  max-width: 11ch;
+  color: var(--ink-strong);
+  font-size: clamp(42px, 6vw, 72px);
+  line-height: 0.95;
+}
+
+.hero-summary {
+  max-width: 60ch;
+  margin: 18px 0 0;
+  color: var(--ink-body);
+  font-size: 16px;
+  line-height: 1.8;
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.hero-poster {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 24px;
+  border-radius: calc(var(--radius-xl) - 4px);
+  background:
+    linear-gradient(180deg, rgba(255, 251, 244, 0.8), rgba(240, 228, 210, 0.9)),
+    radial-gradient(circle at top right, rgba(196, 111, 60, 0.18), transparent 42%);
+  border: 1px solid rgba(83, 69, 54, 0.1);
+  transition: transform var(--motion-smooth) var(--ease-smooth), box-shadow var(--motion-smooth) var(--ease-smooth);
+}
+
+.poster-date {
+  color: var(--ink-strong);
+  font-size: clamp(28px, 4vw, 42px);
+  line-height: 1;
+}
+
+.poster-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.poster-metric {
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(255, 250, 242, 0.82);
+  border: 1px solid rgba(83, 69, 54, 0.1);
+}
+
+.poster-metric span {
+  display: block;
+  font-size: 12px;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.poster-metric strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 28px;
+  color: var(--ink-strong);
+}
+
+.poster-note {
+  margin: auto 0 0;
+  color: var(--ink-muted);
+  line-height: 1.7;
 }
 
 .home-layout {
@@ -424,241 +649,290 @@ watch(() => route.query.date, (newDate) => {
   align-items: start;
 }
 
-.day-panel {
+.main-rail,
+.side-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
   min-width: 0;
 }
 
-.group-date {
-  font-size: 18px;
-  font-weight: bold;
-  color: #303133;
-}
-
-.source-link {
-  margin-left: 15px;
-  font-size: 13px;
-  font-weight: normal;
-}
-
-.section-title {
+.section-header {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 18px;
-}
-
-.title-text {
-  font-size: 18px;
-  font-weight: bold;
-  color: #303133;
-}
-
-.focus-section {
-  margin-bottom: 32px;
-}
-
-.paper-card {
-  margin-bottom: 20px;
-  border-radius: 12px;
-  border: 1px solid #ebeef5;
-  transition: all 0.3s cubic-bezier(.25,.8,.25,1);
-}
-
-.focus-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.05);
-}
-
-.card-header {
-  display: flex;
+  align-items: flex-end;
   justify-content: space-between;
-  align-items: flex-start;
-}
-
-.title-area {
-  flex: 1;
-}
-
-.direction-tag {
-  margin-bottom: 8px;
-}
-
-.paper-title {
-  margin: 0;
-  font-size: 20px;
-  color: #1a1a1a;
-  cursor: pointer;
-  line-height: 1.4;
-}
-
-.paper-title:hover {
-  color: #409eff;
-}
-
-.score-badge {
-  background: #fdf6ec;
-  border: 1px solid #faecd8;
-  color: #e6a23c;
-  padding: 5px 10px;
-  border-radius: 8px;
-  text-align: center;
-  margin-left: 15px;
-}
-
-.score-val {
-  display: block;
-  font-size: 18px;
-  font-weight: bold;
-}
-
-.score-label {
-  font-size: 10px;
-  opacity: 0.8;
-}
-
-.summary-box {
-  background-color: #f0f9eb;
-  padding: 15px;
-  border-radius: 8px;
-  margin-bottom: 20px;
-  border-left: 4px solid #67c23a;
-}
-
-.one-line {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 500;
-  color: #2c3e50;
-  line-height: 1.6;
-}
-
-.card-footer {
-  margin-top: 22px;
-  display: flex;
-  align-items: center;
   gap: 20px;
 }
 
-.watching-list {
-  background: #fff;
-  border-radius: 12px;
-  border: 1px solid #ebeef5;
-  overflow: hidden;
+.section-header-tight {
+  margin-top: 8px;
 }
 
-.watching-item {
-  padding: 14px 18px;
-  border-bottom: 1px solid #f0f2f5;
-  cursor: pointer;
-  transition: background 0.2s;
+.section-title {
+  margin: 8px 0 0;
+  color: var(--ink-strong);
+  font-size: clamp(26px, 3vw, 42px);
+  line-height: 1.02;
 }
 
-.watching-item:last-child {
-  border-bottom: none;
+.section-caption {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
-.watching-item:hover {
-  background-color: #f9fbff;
+.loading-state {
+  padding: 18px 0;
 }
 
-.wi-header {
+.empty-state {
+  padding: 32px;
+}
+
+.empty-state h3 {
+  margin: 14px 0 0;
+  color: var(--ink-strong);
+  font-size: 34px;
+}
+
+.empty-state p:last-child {
+  margin: 12px 0 0;
+  color: var(--ink-muted);
+}
+
+.focus-stories {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.focus-story {
+  padding: 28px;
+}
+
+.story-topline,
+.story-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 5px;
+  justify-content: space-between;
+  gap: 16px;
 }
 
-.wi-direction {
-  color: #909399;
-  font-size: 13px;
-  font-family: monospace;
+.story-tags,
+.story-signals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
-.wi-title {
-  font-weight: bold;
-  color: #303133;
-  flex: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.direction-chip {
+  cursor: pointer;
+  transition: border-color var(--motion-fast) ease, color var(--motion-fast) ease, background-color var(--motion-fast) ease;
 }
 
-.wi-score {
+.direction-chip:hover {
+  color: var(--accent-deep);
+  border-color: rgba(196, 111, 60, 0.28);
+  background: rgba(196, 111, 60, 0.12);
+}
+
+.story-score {
+  text-align: right;
+}
+
+.score-label {
+  display: block;
+  color: var(--ink-muted);
   font-size: 12px;
-  color: #e6a23c;
-  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
-.wi-summary {
-  margin: 0;
+.story-score strong {
+  color: var(--ink-strong);
+  font-size: 24px;
+}
+
+.story-title {
+  margin: 20px 0 0;
+  color: var(--ink-strong);
+  font-size: clamp(26px, 3vw, 42px);
+  line-height: 1.06;
+  cursor: pointer;
+}
+
+.story-title:hover {
+  color: var(--accent-deep);
+}
+
+.story-summary {
+  max-width: 62ch;
+  margin: 18px 0 0;
+  color: var(--ink-body);
+  font-size: 16px;
+  line-height: 1.85;
+}
+
+.story-signals {
+  margin-top: 18px;
+}
+
+.story-actions {
+  margin-top: 22px;
+}
+
+.story-link {
   font-size: 14px;
-  color: #606266;
 }
 
-.calendar-panel {
-  position: sticky;
-  top: 16px;
-  background: #fff;
-  border: 1px solid #ebeef5;
-  border-radius: 12px;
-  padding: 14px;
+.watching-block {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.watching-ledger {
+  padding: 12px 0;
+}
+
+.watching-row {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 18px;
+  padding: 20px 24px;
+  cursor: pointer;
+}
+
+.watching-row + .watching-row {
+  border-top: 1px solid var(--line-soft);
+}
+
+.watching-row:hover {
+  background: rgba(255, 250, 242, 0.56);
+}
+
+.watching-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.watching-direction {
+  appearance: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.watching-direction:hover {
+  color: var(--accent-deep);
+}
+
+.watching-score {
+  color: var(--watch-tone);
+  font-size: 26px;
+}
+
+.watching-copy h3 {
+  margin: 0;
+  color: var(--ink-strong);
+  font-size: 22px;
+  line-height: 1.24;
+}
+
+.watching-copy p {
+  margin: 10px 0 0;
+  color: var(--ink-body);
+  line-height: 1.7;
+}
+
+.rail-card {
+  padding: 22px;
+}
+
+.rail-disclosure {
+  display: block;
+}
+
+.rail-summary {
+  display: none;
+}
+
+.rail-title {
+  margin: 10px 0 0;
+  color: var(--ink-strong);
+  font-size: 30px;
+  line-height: 1.06;
+}
+
+.rail-list {
+  margin: 18px 0 0;
+  padding-left: 18px;
+  color: var(--ink-body);
+  line-height: 1.8;
 }
 
 .calendar-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
 
 .month-label {
+  color: var(--ink-strong);
   font-weight: 600;
-  color: #303133;
 }
 
 .month-switch {
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  border: 1px solid #e4e7ed;
-  background: #fff;
-  color: #606266;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--line-soft);
+  background: rgba(255, 250, 242, 0.7);
+  color: var(--ink-body);
   cursor: pointer;
 }
 
 .month-switch:disabled {
+  opacity: 0.4;
   cursor: not-allowed;
-  color: #c0c4cc;
-  background: #f5f7fa;
+}
+
+.weekday-row,
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 8px;
 }
 
 .weekday-row {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: 6px;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
 .weekday-label {
   text-align: center;
-  font-size: 12px;
-  color: #909399;
-}
-
-.calendar-grid {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: 6px;
+  color: var(--ink-muted);
+  font-size: 11px;
+  text-transform: uppercase;
 }
 
 .calendar-cell {
-  height: 34px;
-  border-radius: 8px;
+  height: 38px;
+  border-radius: 12px;
   border: 1px solid transparent;
-  background: #f9fafc;
-  color: #606266;
+  background: rgba(255, 250, 242, 0.92);
+  color: var(--ink-body);
   cursor: pointer;
-  font-size: 13px;
+  transition: background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease;
 }
 
 .calendar-cell.empty {
@@ -667,33 +941,31 @@ watch(() => route.query.date, (newDate) => {
 }
 
 .calendar-cell.has-data {
-  background: #ecf5ff;
-  color: #303133;
+  background: rgba(196, 111, 60, 0.12);
 }
 
 .calendar-cell.no-data {
-  background: #f2f3f5;
-  color: #b4b8bf;
+  background: rgba(103, 92, 79, 0.08);
+  color: rgba(67, 58, 49, 0.44);
 }
 
 .calendar-cell.selected {
-  border-color: #409eff;
-  background: #409eff;
-  color: #fff;
-  font-weight: 600;
+  background: var(--ink-strong);
+  color: #fffaf2;
+  border-color: var(--ink-strong);
 }
 
 .calendar-cell.disabled {
-  opacity: 0.45;
+  opacity: 0.48;
   cursor: not-allowed;
 }
 
 .calendar-legend {
-  margin-top: 12px;
   display: flex;
-  gap: 12px;
+  gap: 14px;
+  margin-top: 14px;
+  color: var(--ink-muted);
   font-size: 12px;
-  color: #909399;
 }
 
 .legend-item {
@@ -706,36 +978,166 @@ watch(() => route.query.date, (newDate) => {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  display: inline-block;
 }
 
 .has-data-dot {
-  background: #409eff;
+  background: var(--accent);
 }
 
 .no-data-dot {
-  background: #c0c4cc;
+  background: rgba(103, 92, 79, 0.32);
 }
 
-@media (max-width: 992px) {
+.recent-issues {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.recent-issue {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--line-soft);
+  background: rgba(255, 250, 242, 0.68);
+  color: var(--ink-body);
+  cursor: pointer;
+}
+
+.recent-issue.active {
+  border-color: rgba(196, 111, 60, 0.34);
+  background: rgba(196, 111, 60, 0.1);
+}
+
+.recent-issue strong {
+  color: var(--accent-deep);
+}
+
+@media (max-width: 1080px) {
+  .hero-band,
   .home-layout {
     grid-template-columns: 1fr;
   }
-
-  .calendar-panel {
-    position: static;
-  }
 }
 
-@media (max-width: 768px) {
-  .page-header {
-    flex-direction: column;
-    gap: 16px;
+@media (max-width: 720px) {
+  .hero-band,
+  .focus-story,
+  .rail-card,
+  .empty-state {
+    padding: 22px;
   }
 
-  .topics-entry-button {
-    margin-left: 0;
+  .hero-band {
+    gap: 22px;
+  }
+
+  .hero-title {
+    max-width: 9ch;
+    font-size: clamp(34px, 10vw, 52px);
+  }
+
+  .hero-summary {
+    font-size: 14px;
+    line-height: 1.7;
+  }
+
+  .hero-actions {
+    flex-direction: column;
+  }
+
+  .hero-actions .primary-button,
+  .hero-actions .secondary-button {
     width: 100%;
+    justify-content: center;
+  }
+
+  .story-topline,
+  .story-actions,
+  .section-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .poster-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .watching-row {
+    grid-template-columns: 1fr;
+  }
+
+  .watching-row,
+  .focus-story {
+    padding: 18px;
+  }
+
+  .story-summary,
+  .watching-copy p {
+    font-size: 15px;
+    line-height: 1.75;
+  }
+
+  .rail-disclosure + .rail-disclosure {
+    margin-top: -6px;
+  }
+
+  .rail-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 18px;
+    border-radius: 18px;
+    border: 1px solid var(--line-soft);
+    background: rgba(255, 250, 242, 0.72);
+    color: var(--ink-strong);
+    cursor: pointer;
+    list-style: none;
+    box-shadow: var(--shadow-card);
+  }
+
+  .rail-summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .rail-summary::after {
+    content: '+';
+    font-size: 18px;
+    color: var(--ink-muted);
+  }
+
+  .rail-disclosure[open] .rail-summary::after {
+    content: '−';
+  }
+
+  .rail-disclosure .rail-card {
+    margin-top: 10px;
+  }
+
+  .calendar-grid {
+    gap: 10px;
+  }
+
+  .calendar-cell {
+    height: 44px;
+    border-radius: 14px;
+  }
+
+  .month-switch {
+    width: 42px;
+    height: 42px;
+  }
+
+  .recent-issues {
+    gap: 12px;
+  }
+
+  .recent-issue {
+    padding: 14px 16px;
   }
 }
 </style>

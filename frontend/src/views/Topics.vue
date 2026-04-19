@@ -1,16 +1,17 @@
 <template>
   <div class="topics-page">
     <div class="page-header">
-      <el-button @click="$router.push('/')">
+      <button class="secondary-button" type="button" @click="$router.push('/')">
         {{ lang === 'cn' ? '返回首页' : 'Back to Home' }}
-      </el-button>
+      </button>
       <div class="header-copy">
-        <h2>{{ lang === 'cn' ? '论文分类' : 'Paper Categories' }}</h2>
+        <p class="eyebrow">{{ lang === 'cn' ? '研究方向' : 'Research tracks' }}</p>
+        <h1 class="serif-title">{{ lang === 'cn' ? '论文分类' : 'Browse the archive by direction' }}</h1>
         <p>
           {{
             lang === 'cn'
-              ? '按技术方向浏览全部历史精选论文。'
-              : 'Browse all curated papers by technical category.'
+              ? '专注了解细分方向'
+              : 'Open each track to review how Focus and Watching papers accumulate over time.'
           }}
         </p>
       </div>
@@ -20,29 +21,25 @@
       <div
         v-for="topic in TOPIC_CATALOG"
         :key="topic.key"
-        class="topic-card"
+        class="topic-card surface-panel interactive-lift"
         role="button"
         tabindex="0"
         @click="goToTopic(topic.key)"
         @keydown.enter.prevent="goToTopic(topic.key)"
         @keydown.space.prevent="goToTopic(topic.key)"
       >
-        <el-card class="topic-card-panel" shadow="hover">
-          <div class="topic-card-body">
-            <div class="topic-topline">
-              <el-tag size="small" effect="plain">{{ topic.key }}</el-tag>
-            </div>
-            <h3 class="topic-title">
-              {{ lang === 'cn' ? topic.labelCn : topic.labelEn }}
-            </h3>
-            <p class="topic-description">
-              {{ lang === 'cn' ? topic.descriptionCn : topic.descriptionEn }}
-            </p>
-            <el-button type="primary" plain @click.stop="goToTopic(topic.key)">
-              {{ lang === 'cn' ? '进入分类' : 'Open Category' }}
-            </el-button>
-          </div>
-        </el-card>
+        <div class="topic-topline">
+          <span class="chip">{{ topic.key }}</span>
+        </div>
+        <h2 class="serif-title topic-title">
+          {{ lang === 'cn' ? topic.labelCn : topic.labelEn }}
+        </h2>
+        <p class="topic-description">
+          {{ lang === 'cn' ? topic.descriptionCn : topic.descriptionEn }}
+        </p>
+        <button class="secondary-button interactive-press" type="button" @click.stop="goToTopic(topic.key)">
+          {{ lang === 'cn' ? '进入分类' : 'Open category' }}
+        </button>
       </div>
     </div>
   </div>
@@ -57,33 +54,36 @@ import { TOPIC_CATALOG } from '../constants/topics'
 const lang = inject('lang')
 const router = useRouter()
 
-const goToTopic = (topicKey) => {
+function goToTopic(topicKey) {
   router.push(`/topic/${topicKey}`)
 }
 </script>
 
 <style scoped>
 .topics-page {
-  padding-bottom: 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
 }
 
 .page-header {
   display: flex;
   align-items: flex-start;
-  gap: 16px;
-  margin-bottom: 28px;
+  gap: 18px;
 }
 
-.header-copy h2 {
-  margin: 0 0 8px;
-  color: #303133;
-  font-size: 26px;
+.header-copy h1 {
+  margin: 10px 0 0;
+  color: var(--ink-strong);
+  font-size: clamp(34px, 5vw, 54px);
+  line-height: 0.98;
 }
 
-.header-copy p {
-  margin: 0;
-  color: #909399;
-  font-size: 15px;
+.header-copy p:last-child {
+  max-width: 56ch;
+  margin: 14px 0 0;
+  color: var(--ink-muted);
+  line-height: 1.8;
 }
 
 .topic-grid {
@@ -93,61 +93,42 @@ const goToTopic = (topicKey) => {
 }
 
 .topic-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 22px;
+  border-radius: var(--radius-xl);
   cursor: pointer;
-  border-radius: 14px;
-  transition: transform 0.2s ease;
-}
-
-.topic-card:hover {
-  transform: translateY(-4px);
 }
 
 .topic-card:focus-visible {
-  outline: 2px solid #409eff;
+  outline: 2px solid rgba(196, 111, 60, 0.36);
   outline-offset: 4px;
-}
-
-.topic-card-panel {
-  height: 100%;
-  border-radius: 14px;
-  border: 1px solid #ebeef5;
-}
-
-.topic-card-body {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 12px;
-}
-
-.topic-topline {
-  display: flex;
-  justify-content: space-between;
-  width: 100%;
 }
 
 .topic-title {
   margin: 0;
-  font-size: 20px;
-  color: #1f2937;
+  color: var(--ink-strong);
+  font-size: 28px;
 }
 
 .topic-description {
   margin: 0;
-  min-height: 64px;
-  color: #606266;
-  line-height: 1.65;
-  font-size: 14px;
+  color: var(--ink-body);
+  line-height: 1.8;
 }
 
 @media (max-width: 768px) {
   .page-header {
     flex-direction: column;
-    align-items: stretch;
   }
 
-  .topic-grid {
-    grid-template-columns: 1fr;
+  .topic-card {
+    padding: 18px;
+  }
+
+  .header-copy h1 {
+    font-size: clamp(32px, 11vw, 44px);
   }
 }
 </style>

@@ -991,3 +991,37 @@ When continuing work in this repository, read this file first.
   - no `.env`, local config, or credential files are present in the pending diff
   - `README.md` contains only placeholder example values such as `root:password` and `your-kimi-api-key`, not real secrets
   - no actual API key value was detected in the current push scope
+
+## Latest Implementation Update (2026-04-20, frontend concept redesign closure)
+- Active branch: `codex/frontend-concept-redesign`.
+- User approved moving the frontend concept redesign toward a formal PR after local review.
+- Current frontend direction:
+  - Vue 3 + Vite remains the active stack.
+  - The UI now uses a warmer editorial briefing style rather than the previous Element Plus / admin-system look.
+  - Homepage, detail page, candidate pool, topics, topic detail, unsubscribe page, and the app shell were redesigned.
+  - Mobile navigation is drawer-based; do not regress to wrapped desktop navigation on small screens.
+  - Direction chips on Home and Detail are navigation controls and should route to `/topic/:direction`.
+- Mock behavior:
+  - Runtime mock data exists under `frontend/src/mocks/`.
+  - Mock mode must be explicit via `VITE_USE_MOCK_BRIEF_DATA=true`.
+  - Default local/prod behavior is real API mode through `VITE_API_BASE_URL`.
+- Button/design decision:
+  - User rejected the attempted liquid-glass / black-glow button treatment.
+  - Keep primary buttons as stable pure-black, high-contrast buttons.
+  - Mobile must not use dynamic glass button effects.
+- Mobile layout pitfall:
+  - `.mobile-only { display: block !important; }` broke flex alignment when applied directly to the mobile action container.
+  - Future mobile-only flex containers should not reuse that class directly unless the display override is accounted for.
+- Local database and integration state:
+  - Local MySQL was rebuilt with Homebrew MySQL `9.6.0_2`.
+  - Local root password is `password`.
+  - `scripts/setup_local_db.py` initialized and validated `ai_paper_summary`.
+  - To avoid slow local AI pipeline reruns, recent production rows were copied into local MySQL for `2026-04-18` and `2026-04-19`.
+  - Imported local data includes 90 `paper` rows, 90 `paper_summary` rows, and 145 `paper_ai_trace` rows.
+  - Category split after import:
+    - `2026-04-18`: Focus 5, Watching 9, Candidate 26.
+    - `2026-04-19`: Focus 5, Watching 10, Candidate 35.
+  - Local backend is expected on `127.0.0.1:8000`; local frontend preview is expected on `127.0.0.1:4173`.
+- README screenshot:
+  - `image/readme-home-v2.png` was regenerated from the real local API, not mock data.
+  - Preserve `1365 x 900` dimensions for future replacements unless the README layout is intentionally changed.

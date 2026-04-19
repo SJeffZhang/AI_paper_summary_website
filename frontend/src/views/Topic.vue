@@ -1,39 +1,46 @@
 <template>
   <div class="topic-page">
     <div class="page-header">
-      <el-button :icon="Back" @click="$router.push('/topics')">{{ lang === 'cn' ? '返回分类' : 'Back to Categories' }}</el-button>
-      <h2 class="title">
-        {{ lang === 'cn' ? '技术方向' : 'Topic' }}:
-        {{ lang === 'cn' ? (topicMeta?.labelCn || $route.params.name) : (topicMeta?.labelEn || $route.params.name) }}
-      </h2>
-      <p class="subtitle">
-        {{
-          lang === 'cn'
-            ? (topicMeta?.descriptionCn || '聚合该方向下的所有历史精选论文')
-            : (topicMeta?.descriptionEn || 'All curated papers under this technical direction')
-        }}
-      </p>
+      <button class="secondary-button" type="button" @click="$router.push('/topics')">
+        {{ lang === 'cn' ? '返回分类' : 'Back to Categories' }}
+      </button>
+      <div>
+        <p class="eyebrow">{{ lang === 'cn' ? '技术方向' : 'Topic' }}</p>
+        <h1 class="serif-title">
+          {{ lang === 'cn' ? (topicMeta?.labelCn || $route.params.name) : (topicMeta?.labelEn || $route.params.name) }}
+        </h1>
+        <p class="subtitle">
+          {{
+            lang === 'cn'
+              ? (topicMeta?.descriptionCn || '聚合该方向下的所有历史精选论文')
+              : (topicMeta?.descriptionEn || 'All curated papers under this technical direction')
+          }}
+        </p>
+      </div>
     </div>
 
-    <div v-loading="loading" class="topic-feed">
-      <el-card v-for="paper in papers" :key="paper.id" class="paper-card" shadow="hover">
-        <div class="card-content">
-          <div class="meta-left">
-            <el-tag size="small" type="danger" effect="dark" v-if="paper.category === 'focus'">Focus</el-tag>
-            <el-tag size="small" type="info" v-else>Watching</el-tag>
-            <div class="date-text">{{ paper.issue_date }}</div>
-          </div>
-          <div class="main-right">
-            <h3 class="paper-title" @click="$router.push(`/paper/${paper.id}`)">
-              {{ lang === 'cn' ? paper.title_zh : paper.title_original }}
-            </h3>
-            <p class="summary">{{ lang === 'cn' ? paper.one_line_summary : paper.one_line_summary_en }}</p>
-          </div>
-        </div>
-      </el-card>
+    <div v-if="loading" class="loading-state">
+      <el-skeleton :rows="8" animated />
+    </div>
 
-      <div v-if="!loading && papers.length === 0" class="empty-state">
-        <el-empty :description="lang === 'cn' ? '暂无该方向论文' : 'No papers found for this topic'" />
+    <div v-else class="topic-feed">
+      <article v-for="paper in papers" :key="paper.id" class="topic-row surface-panel interactive-lift">
+        <div class="topic-row-meta">
+          <span class="chip" :class="paper.category === 'focus' ? 'focus-chip' : 'watching-chip'">
+            {{ paper.category === 'focus' ? 'Focus' : 'Watching' }}
+          </span>
+          <span class="topic-date">{{ paper.issue_date }}</span>
+        </div>
+        <div class="topic-row-main">
+          <h3 class="serif-title" @click="$router.push(`/paper/${paper.id}`)">
+            {{ lang === 'cn' ? paper.title_zh : paper.title_original }}
+          </h3>
+          <p>{{ lang === 'cn' ? paper.one_line_summary : paper.one_line_summary_en }}</p>
+        </div>
+      </article>
+
+      <div v-if="!papers.length" class="empty-state surface-panel">
+        {{ lang === 'cn' ? '暂无该方向论文' : 'No papers found for this topic' }}
       </div>
 
       <div class="pagination-area" v-if="total > pageSize">
@@ -51,9 +58,9 @@
 </template>
 
 <script setup>
-import { computed, ref, onMounted, inject, watch } from 'vue'
+import { computed, inject, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Back } from '@element-plus/icons-vue'
+
 import { getPapers } from '../api/papers'
 import { getTopicMeta } from '../constants/topics'
 
@@ -67,14 +74,13 @@ const pageSize = ref(20)
 const total = ref(0)
 const topicMeta = computed(() => getTopicMeta(route.params.name))
 
-const fetchTopicPapers = async () => {
+async function fetchTopicPapers() {
   loading.value = true
   try {
-    // Use server-side filtering for direction
-    const data = await getPapers({ 
-      direction: route.params.name, 
+    const data = await getPapers({
+      direction: route.params.name,
       page: currentPage.value,
-      limit: pageSize.value 
+      limit: pageSize.value,
     })
     papers.value = data.items
     total.value = data.total
@@ -86,12 +92,12 @@ const fetchTopicPapers = async () => {
   }
 }
 
-const handlePageChange = (val) => {
-  router.push({ query: { ...route.query, page: val } })
+function handlePageChange(value) {
+  router.push({ query: { ...route.query, page: value } })
 }
 
-watch(() => route.query.page, (newVal) => {
-  currentPage.value = Number(newVal) || 1
+watch(() => route.query.page, (newValue) => {
+  currentPage.value = Number(newValue) || 1
   fetchTopicPapers()
 })
 
@@ -100,58 +106,104 @@ onMounted(fetchTopicPapers)
 
 <style scoped>
 .topic-page {
-  padding-bottom: 50px;
-}
-.page-header {
-  margin-bottom: 30px;
-}
-.title {
-  margin: 15px 0 5px 0;
-  font-size: 22px;
-}
-.subtitle {
-  color: #909399;
-  font-size: 14px;
-}
-.paper-card {
-  margin-bottom: 15px;
-  border-radius: 8px;
-}
-.card-content {
-  display: flex;
-  gap: 20px;
-}
-.meta-left {
-  width: 100px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  align-items: center;
+  gap: 22px;
 }
-.date-text {
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+}
+
+.page-header h1 {
+  margin: 10px 0 0;
+  color: var(--ink-strong);
+  font-size: clamp(34px, 5vw, 54px);
+  line-height: 0.98;
+}
+
+.subtitle {
+  max-width: 54ch;
+  margin: 14px 0 0;
+  color: var(--ink-muted);
+  line-height: 1.8;
+}
+
+.topic-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.topic-row {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  gap: 20px;
+  padding: 22px;
+  border-radius: var(--radius-xl);
+}
+
+.topic-row-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.topic-date {
+  color: var(--ink-muted);
   font-size: 12px;
-  color: #909399;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
-.main-right {
-  flex: 1;
-}
-.paper-title {
-  margin: 0 0 10px 0;
-  font-size: 18px;
-  color: #303133;
+
+.topic-row-main h3 {
+  margin: 0;
+  color: var(--ink-strong);
+  font-size: 30px;
+  line-height: 1.08;
   cursor: pointer;
 }
-.paper-title:hover {
-  color: #409eff;
+
+.topic-row-main p {
+  margin: 12px 0 0;
+  color: var(--ink-body);
+  line-height: 1.8;
 }
-.summary {
-  margin: 0;
-  color: #606266;
-  font-size: 14px;
+
+.empty-state {
+  padding: 24px;
+  border-radius: var(--radius-xl);
+  color: var(--ink-muted);
 }
+
 .pagination-area {
   display: flex;
   justify-content: center;
-  margin-top: 30px;
+  margin-top: 10px;
+}
+
+@media (max-width: 768px) {
+  .page-header,
+  .topic-row {
+    grid-template-columns: 1fr;
+  }
+
+  .page-header {
+    flex-direction: column;
+  }
+
+  .page-header h1 {
+    font-size: clamp(32px, 11vw, 44px);
+  }
+
+  .topic-row {
+    padding: 18px;
+  }
+
+  .topic-row-main h3 {
+    font-size: 26px;
+  }
 }
 </style>
