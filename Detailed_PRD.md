@@ -290,6 +290,9 @@
     *   **NULL 契约**: 
         *   若目标论文 `category == 'candidate'`，响应中所有的解读字段 (core_highlights 等) 必须显式返回 `null`。
         *   若目标论文 `category != 'candidate'`，响应中的 `candidate_reason` 必须返回 `null`。
+    *   **作者单位缺失语义**:
+        *   `authors` 中每个元素的 `affiliation` 允许为空字符串；上游来源未提供机构信息时，后端不得伪造作者单位。
+        *   `venue` 仍作为评分与元数据字段保留，但不要求前端详情页将其作为“作者单位”兜底来源。
 3.  **POST /api/v1/subscribe**: `{ "email": "..." }` $\rightarrow$ `{ "code": 200, "msg": "邮件已发送", "data": null }`。
 4.  **GET /api/v1/subscribe/verify**: 验证激活。
     *   **Params**: `token` (string, required)。
@@ -328,13 +331,19 @@
 *   移动端不启用复杂动态玻璃按钮效果；主按钮保持稳定纯黑高对比样式，保证文字清晰。
 *   方向标签属于导航入口：首页与详情页中的方向标签必须可点击并跳转到对应方向页。
 
-### 8.3 Mock 预览开关
+### 8.3 详情页事实卡展示规则
+*   详情页顶部事实卡当前固定展示：作者、作者单位、arXiv 编号。
+*   作者单位卡片的数据源为 `authors[].affiliation`，前端需先执行去空与去重。
+*   当有效机构数为 1-2 个时，直接展示完整机构名；当机构数 >= 3 时，允许压缩展示，并通过悬停提示暴露完整列表。
+*   若当前论文的 `authors[].affiliation` 全部为空，前端必须明确提示“论文源未提供作者单位 / Affiliation not provided by the source”，不得显示空白，也不应将 `venue` 伪装成作者单位。
+
+### 8.4 Mock 预览开关
 *   正式运行与普通本地运行默认请求真实后端 API。
 *   仅当 `VITE_USE_MOCK_BRIEF_DATA=true` 时，前端才允许切换到运行时 mock provider。
 *   mock provider 只服务本地视觉评审和无后端预览，不得成为生产默认路径。
 *   前端 API 基准地址继续通过 `VITE_API_BASE_URL` 配置；未设置时使用现有默认值。
 
-### 8.4 README 截图约束
+### 8.5 README 截图约束
 *   README 首页截图使用 `image/readme-home-v2.png`。
 *   当前截图尺寸固定为 `1365 x 900`，后续替换时应保持相同比例，避免 README 展示尺寸跳变。
 *   正式截图应来自真实后端 API 数据，不应使用 mock 数据截图。

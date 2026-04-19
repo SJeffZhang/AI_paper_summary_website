@@ -46,8 +46,8 @@
             <strong>{{ formatAuthors(paper.authors) || '--' }}</strong>
           </div>
           <div class="fact-block interactive-lift">
-            <span>{{ lang === 'cn' ? '来源' : 'Venue' }}</span>
-            <strong>{{ paper.venue || '--' }}</strong>
+            <span>{{ lang === 'cn' ? '作者单位' : 'Affiliations' }}</span>
+            <strong :title="getAffiliationTooltip(paper)">{{ getAffiliationLabel(paper) }}</strong>
           </div>
           <div class="fact-block interactive-lift">
             <span>arXiv</span>
@@ -166,6 +166,33 @@ function formatCandidateReason(reason) {
     reviewer_rejected: lang.value === 'cn' ? '审核剔除' : 'Reviewer Rejected',
   }
   return map[reason] || reason
+}
+
+function getAffiliations(authors = []) {
+  return [...new Set(
+    authors
+      .map((author) => String(author?.affiliation || '').trim())
+      .filter(Boolean)
+  )]
+}
+
+function getAffiliationLabel(paperData) {
+  const affiliations = getAffiliations(paperData?.authors || [])
+  if (affiliations.length === 0) {
+    return lang.value === 'cn' ? '论文源未提供作者单位' : 'Affiliation not provided by the source'
+  }
+  if (affiliations.length <= 2) {
+    return affiliations.join(' / ')
+  }
+
+  const lead = affiliations.slice(0, 2).join(' / ')
+  const remaining = affiliations.length - 2
+  return lang.value === 'cn' ? `${lead} 等 ${affiliations.length} 家机构` : `${lead} +${remaining} more`
+}
+
+function getAffiliationTooltip(paperData) {
+  const affiliations = getAffiliations(paperData?.authors || [])
+  return affiliations.length > 0 ? affiliations.join('\n') : ''
 }
 
 function goToTopic(topicKey) {

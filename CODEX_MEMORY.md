@@ -1025,3 +1025,17 @@ When continuing work in this repository, read this file first.
 - README screenshot:
   - `image/readme-home-v2.png` was regenerated from the real local API, not mock data.
   - Preserve `1365 x 900` dimensions for future replacements unless the README layout is intentionally changed.
+
+## Latest Detail-Page Data Check (2026-04-20)
+- The detail-page second fact card was changed from `venue` display to `authors[].affiliation` display.
+- This was verified against the live production detail payload for `paper_id=6652`:
+  - every `authors[*].affiliation` value was an empty string
+  - `venue` was also `null`
+- Conclusion:
+  - the blank-looking field was not caused by a frontend fetch bug
+  - for some real papers, the upstream sources simply do not provide affiliation metadata
+- Current frontend behavior on `codex/frontend-concept-redesign`:
+  - if affiliations exist, the UI de-duplicates and compresses them for the detail-page fact card
+  - if no affiliation exists, the UI explicitly renders `论文源未提供作者单位` / `Affiliation not provided by the source`
+  - the UI must not repurpose `venue` as a fake affiliation fallback
+- `Detailed_PRD.md` was updated to reflect this current detail-page UX rule.
