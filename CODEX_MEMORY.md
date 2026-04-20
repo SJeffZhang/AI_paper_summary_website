@@ -1039,3 +1039,13 @@ When continuing work in this repository, read this file first.
   - if no affiliation exists, the UI explicitly renders `论文源未提供作者单位` / `Affiliation not provided by the source`
   - the UI must not repurpose `venue` as a fake affiliation fallback
 - `Detailed_PRD.md` was updated to reflect this current detail-page UX rule.
+
+## Latest Header Fix (2026-04-20, issue #10)
+- Issue #10 was about the top header rendering as a blurry horizontal bar.
+- Root cause: the header had two stacked blur layers:
+  - outer `.shell-header`
+  - inner `.shell-header-inner.surface-panel`
+- The accepted fix is to keep the glass effect only on the inner pill container and remove the outer header blur/background treatment entirely.
+- The local verification path for this issue used:
+  - frontend at `127.0.0.1:4173`
+  - backend at `127.0.0.1:8000`
