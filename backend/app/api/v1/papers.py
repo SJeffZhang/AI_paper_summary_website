@@ -36,6 +36,44 @@ def _normalize_authors(raw_authors):
     return normalized
 
 
+def _normalize_affiliations(raw_affiliations, raw_authors=None):
+    values = []
+    if isinstance(raw_affiliations, list):
+        for item in raw_affiliations:
+            if isinstance(item, dict):
+                value = (
+                    item.get("name")
+                    or item.get("affiliation")
+                    or item.get("institution")
+                    or item.get("organization")
+                )
+            else:
+                value = item
+            text = str(value or "").strip()
+            if text:
+                values.append(text)
+    elif isinstance(raw_affiliations, str):
+        text = raw_affiliations.strip()
+        if text:
+            values.append(text)
+
+    if not values:
+        values = [
+            author["affiliation"]
+            for author in _normalize_authors(raw_authors)
+            if author.get("affiliation")
+        ]
+
+    deduped = []
+    seen = set()
+    for value in values:
+        key = " ".join(str(value).casefold().split())
+        if key and key not in seen:
+            seen.add(key)
+            deduped.append(str(value).strip())
+    return deduped
+
+
 def _serialize_list_item(summary: PaperSummary, paper: Paper) -> PaperListItem:
     return PaperListItem(
         id=paper.id,
@@ -178,6 +216,7 @@ def get_paper_detail(paper_id: int, db: Session = Depends(get_db)):
     detail_payload.update(
         {
             "authors": _normalize_authors(paper.authors),
+            "affiliations": _normalize_affiliations(paper.affiliations, paper.authors),
             "venue": paper.venue,
             "abstract": paper.abstract,
             "pdf_url": paper.pdf_url,

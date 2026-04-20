@@ -306,6 +306,23 @@ def test_run_editor_uses_large_longform_token_budget(monkeypatch):
     assert captured["kwargs"]["max_tokens"] >= 4096
 
 
+def test_truncate_abstract_defaults_to_configured_16000_chars(monkeypatch):
+    monkeypatch.setattr("app.services.ai_processor.settings.KIMI_ABSTRACT_MAX_CHARS", 16000)
+    abstract = "a" * 17000
+
+    truncated = AIProcessor._truncate_abstract(abstract)
+
+    assert len(truncated) == 16000
+    assert truncated.endswith("…")
+
+
+def test_truncate_abstract_can_be_disabled(monkeypatch):
+    monkeypatch.setattr("app.services.ai_processor.settings.KIMI_ABSTRACT_MAX_CHARS", 0)
+    abstract = "a" * 17000
+
+    assert AIProcessor._truncate_abstract(abstract) == abstract
+
+
 def test_run_writer_accepts_bracketless_editor_headers(monkeypatch):
     processor = AIProcessor(api_key="test-key")
     editor_brief = (

@@ -149,12 +149,35 @@
 
 为了兼容历史实现，部分环境变量仍沿用 `KIMI_*` 前缀，但当前默认服务商已经是 `MiniMax`，不是 Moonshot Kimi。
 
+### 论文级机构补全
+
+后端可以在每日流水线中仅对入选 `focus` / `watching` 的论文，基于论文 PDF 首页补全论文级 `paper.affiliations` 机构列表。该能力默认关闭，避免本地开发、测试或探测期号时触发大量 PDF 下载和 MiniMax 调用；生产环境可通过 `AFFILIATION_ENRICH_ENABLED=true` 启用。
+
+补全流程：
+
+1. 下载论文 PDF，并只抽取第一页文本。
+2. 调用 MiniMax 做命名实体抽取：从首页文本中返回机构/组织名称，一行一个。
+3. 后端先用确定性规则校验每个机构是否能在首页文本中找到支持。
+4. 文本支持通过后，再调用 MiniMax review 做兜底审核，只判断这些输出值本身是不是机构/单位名，不审核其他内容。
+5. 任一步校验不通过时带上失败原因重跑，最多 `AFFILIATION_ENRICH_MAX_RETRIES` 次，默认 `5`。
+6. 只有整组校验通过时才写入 `paper.affiliations`；不会结构化覆盖 `authors[].affiliation`。
+
+历史数据可用脚本按需回填；脚本默认也只处理 `paper_summary.category in ('focus', 'watching')` 的论文：
+
+```bash
+cd backend
+./venv/bin/python scripts/backfill_affiliations.py --start-date 2026-04-01 --end-date 2026-04-20 --limit 10
+./venv/bin/python scripts/backfill_affiliations.py --arxiv-id 2604.12967v1 --apply
+```
+
+脚本默认 dry-run；只有加 `--apply` 才会写库。
+
 ## 数据落库方式
 
 ### 关键数据表
 
 - `paper`
-  - 论文静态元数据，如 `arxiv_id`、中英文标题、作者、venue、abstract、pdf_url
+  - 论文静态元数据，如 `arxiv_id`、中英文标题、作者、论文级机构列表、venue、abstract、pdf_url
 - `paper_summary`
   - 以 `issue_date` 为核心的快照表，是首页、详情页、候选池和方向页的查询真相源
 - `paper_ai_trace`
@@ -476,12 +499,17 @@ cd backend
 - `PIPELINE_PROBE_DAYS`
 - `SEMANTIC_SCHOLAR_TIMEOUT_SECONDS`
 - `CRAWLER_CITATION_MAX_WORKERS`
+- `AFFILIATION_ENRICH_ENABLED`
+- `AFFILIATION_ENRICH_TIMEOUT_SECONDS`
+- `AFFILIATION_ENRICH_MAX_RETRIES`
+- `AFFILIATION_ENRICH_PAGE_TEXT_MIN_CHARS`
 
 固定写入 deploy 生成 `.env` 的默认值：
 
 - `KIMI_MIN_REQUEST_INTERVAL_SECONDS=1.5`
 - `KIMI_LONGFORM_MIN_REQUEST_INTERVAL_SECONDS=2.5`
 - `KIMI_TITLE_LOCALIZATION_ATTEMPTS=4`
+- `KIMI_ABSTRACT_MAX_CHARS=16000`
 - `KIMI_EDITOR_MAX_TOKENS=1400`
 - `KIMI_WRITER_FOCUS_MAX_TOKENS=1800`
 - `KIMI_WRITER_WATCHING_MAX_TOKENS=1300`

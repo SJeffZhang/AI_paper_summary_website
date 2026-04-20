@@ -749,8 +749,12 @@ class AIProcessor:
         return normalized
 
     @staticmethod
-    def _truncate_abstract(abstract: str, limit: int = 1600) -> str:
+    def _truncate_abstract(abstract: str, limit: Optional[int] = None) -> str:
+        if limit is None:
+            limit = int(settings.KIMI_ABSTRACT_MAX_CHARS or 0)
         normalized = " ".join(str(abstract or "").split())
+        if limit <= 0:
+            return normalized
         if len(normalized) <= limit:
             return normalized
         return normalized[: limit - 1].rstrip() + "…"

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
 from app.models.domain import Paper, PaperAITrace, PaperSummary, SystemTaskLog
+from app.services.affiliation_enricher import AffiliationEnricher
 from app.services.ai_processor import AIProcessor, StructuredOutputError
 from app.services.crawler import Crawler
 from app.services.notification_service import send_owner_alert, shanghai_today
@@ -40,6 +41,7 @@ class Pipeline:
         self.crawler = Crawler()
         self.scorer = Scorer()
         self.ai_processor = AIProcessor()
+        self.affiliation_enricher = AffiliationEnricher()
 
     def run(self, target_date: str = None) -> None:
         issue_date = self._resolve_issue_date(target_date)
@@ -90,6 +92,8 @@ class Pipeline:
             if not watching_enabled:
                 watching_selected = []
                 watching_overflow = []
+
+            self._enrich_selected_affiliations(focus_selected, watching_selected)
 
             snapshot_papers = scored_papers
             issue_attempted_ids: set[str] = set()
@@ -194,6 +198,24 @@ class Pipeline:
             watching_overflow,
         )
 
+    def _enrich_selected_affiliations(
+        self,
+        focus_selected: Sequence[Dict[str, Any]],
+        watching_selected: Sequence[Dict[str, Any]],
+    ) -> None:
+        if not settings.AFFILIATION_ENRICH_ENABLED:
+            return
+
+        selected_papers = list(focus_selected) + list(watching_selected)
+        for paper in selected_papers:
+            result = self.affiliation_enricher.enrich_paper(paper)
+            paper["affiliation_enrich_status"] = result.status
+            paper["affiliation_enrich_attempts"] = result.attempts
+            if result.reasons:
+                paper["affiliation_enrich_reasons"] = result.reasons
+            if result.status == "overwrite_applied":
+                paper["affiliations"] = result.affiliations
+
     def _start_task(self, issue_date: date) -> SystemTaskLog:
         task_log = self.db.query(SystemTaskLog).filter(SystemTaskLog.issue_date == issue_date).first()
         if task_log and task_log.status == "SUCCESS":
@@ -225,6 +247,8 @@ class Pipeline:
             db_paper.title_zh = meta["title_zh"]
             db_paper.title_original = meta["title_original"]
             db_paper.authors = meta["authors"]
+            if "affiliations" in meta:
+                db_paper.affiliations = meta.get("affiliations") or None
             db_paper.venue = meta.get("venue")
             db_paper.abstract = meta["abstract"]
             db_paper.pdf_url = meta["pdf_url"]

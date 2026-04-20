@@ -46,7 +46,7 @@
             <strong>{{ formatAuthors(paper.authors) || '--' }}</strong>
           </div>
           <div class="fact-block interactive-lift">
-            <span>{{ lang === 'cn' ? '作者单位' : 'Affiliations' }}</span>
+            <span>{{ lang === 'cn' ? '机构' : 'Institutions' }}</span>
             <strong :title="getAffiliationTooltip(paper)">{{ getAffiliationLabel(paper) }}</strong>
           </div>
           <div class="fact-block interactive-lift">
@@ -168,18 +168,20 @@ function formatCandidateReason(reason) {
   return map[reason] || reason
 }
 
-function getAffiliations(authors = []) {
-  return [...new Set(
-    authors
-      .map((author) => String(author?.affiliation || '').trim())
-      .filter(Boolean)
-  )]
+function getAffiliations(paperData) {
+  const paperLevel = Array.isArray(paperData?.affiliations)
+    ? paperData.affiliations.map((affiliation) => String(affiliation || '').trim()).filter(Boolean)
+    : []
+  const authorLevel = (paperData?.authors || [])
+    .map((author) => String(author?.affiliation || '').trim())
+    .filter(Boolean)
+  return [...new Set(paperLevel.length > 0 ? paperLevel : authorLevel)]
 }
 
 function getAffiliationLabel(paperData) {
-  const affiliations = getAffiliations(paperData?.authors || [])
+  const affiliations = getAffiliations(paperData)
   if (affiliations.length === 0) {
-    return lang.value === 'cn' ? '论文源未提供作者单位' : 'Affiliation not provided by the source'
+    return lang.value === 'cn' ? '未识别到论文机构' : 'Institutions not identified'
   }
   if (affiliations.length <= 2) {
     return affiliations.join(' / ')
@@ -191,7 +193,7 @@ function getAffiliationLabel(paperData) {
 }
 
 function getAffiliationTooltip(paperData) {
-  const affiliations = getAffiliations(paperData?.authors || [])
+  const affiliations = getAffiliations(paperData)
   return affiliations.length > 0 ? affiliations.join('\n') : ''
 }
 

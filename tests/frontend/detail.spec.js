@@ -42,11 +42,12 @@ describe('Detail view', () => {
       ...focusDetail,
       venue: null,
       authors: [
-        { name: 'Alice', affiliation: 'OpenAI' },
-        { name: 'Bob', affiliation: 'Stanford University' },
-        { name: 'Carol', affiliation: 'OpenAI' },
-        { name: 'Dave', affiliation: 'Google DeepMind' },
+        { name: 'Alice', affiliation: '' },
+        { name: 'Bob', affiliation: '' },
+        { name: 'Carol', affiliation: '' },
+        { name: 'Dave', affiliation: '' },
       ],
+      affiliations: ['OpenAI', 'Stanford University', 'OpenAI', 'Google DeepMind'],
     })
     const router = await createTestRouter('/paper/:id', '/paper/1', Detail)
 
@@ -68,6 +69,7 @@ describe('Detail view', () => {
     getPaperDetailMock.mockResolvedValue({
       ...focusDetail,
       authors: [{ name: 'Alice', affiliation: '' }],
+      affiliations: [],
       venue: null,
     })
     const router = await createTestRouter('/paper/:id', '/paper/1', Detail)
@@ -82,7 +84,7 @@ describe('Detail view', () => {
     await flushPromises()
 
     const affiliationBlock = wrapper.findAll('.fact-block strong')[1]
-    expect(affiliationBlock.text()).toBe('论文源未提供作者单位')
+    expect(affiliationBlock.text()).toBe('未识别到论文机构')
     expect(affiliationBlock.attributes('title')).toBe('')
   })
 

@@ -38,6 +38,16 @@ def test_practitioner_keyword_matching_uses_boundaries(sample_paper_payload):
     assert scored["threshold_category"] == "candidate"
 
 
+def test_top_org_signal_can_use_paper_level_affiliations(sample_paper_payload):
+    paper = sample_paper_payload.copy()
+    paper["authors"] = [{"name": "Test", "affiliation": ""}]
+    paper["affiliations"] = ["Stanford University"]
+
+    scored = Scorer().score_paper(paper)
+
+    assert scored["score_reasons"]["top_org"] == 20
+
+
 @pytest.mark.parametrize(
     ("score", "expected"),
     [

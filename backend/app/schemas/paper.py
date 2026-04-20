@@ -41,6 +41,7 @@ class PaperListResponseModel(ResponseModel):
 
 class PaperDetail(PaperListItem):
     authors: List[AuthorModel]
+    affiliations: List[str] = []
     venue: Optional[str] = None
     abstract: str
     pdf_url: str

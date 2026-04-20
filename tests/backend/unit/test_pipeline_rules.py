@@ -5,6 +5,7 @@ import pytest
 
 from app.core.config import settings
 from app.models.domain import Paper, PaperAITrace, PaperSummary, SystemTaskLog
+from app.services.affiliation_enricher import AffiliationEnrichmentResult
 from app.services.ai_processor import StructuredOutputError
 from app.services.pipeline import Pipeline
 
@@ -969,6 +970,35 @@ def test_run_uses_quantity_first_fallback_when_supply_is_insufficient(db_session
     assert task_log.processed_count == 2
     assert len(summaries) == 2
     assert all(summary.category == "focus" for summary in summaries)
+
+
+def test_affiliation_enrichment_only_runs_for_selected_focus_and_watching(db_session, monkeypatch):
+    pipeline = Pipeline(db_session)
+    calls = []
+
+    class FakeAffiliationEnricher:
+        def enrich_paper(self, paper):
+            calls.append(paper["arxiv_id"])
+            return AffiliationEnrichmentResult(
+                status="overwrite_applied",
+                affiliations=["OpenAI"],
+                attempts=1,
+            )
+
+    pipeline.affiliation_enricher = FakeAffiliationEnricher()
+    monkeypatch.setattr("app.services.pipeline.settings.AFFILIATION_ENRICH_ENABLED", True)
+
+    focus = {"arxiv_id": "focus-paper", "authors": [{"name": "Alice", "affiliation": ""}]}
+    watching = {"arxiv_id": "watching-paper", "authors": [{"name": "Bob", "affiliation": ""}]}
+    candidate = {"arxiv_id": "candidate-paper", "authors": [{"name": "Carol", "affiliation": ""}]}
+
+    pipeline._enrich_selected_affiliations([focus], [watching])
+
+    assert calls == ["focus-paper", "watching-paper"]
+    assert focus["affiliations"] == ["OpenAI"]
+    assert watching["affiliations"] == ["OpenAI"]
+    assert candidate["authors"][0]["affiliation"] == ""
+    assert "affiliations" not in candidate
 
 
 def test_run_requeues_full_agent_pipeline_after_reviewer_rejections_until_success(db_session, monkeypatch):
