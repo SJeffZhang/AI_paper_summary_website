@@ -796,7 +796,7 @@ watch(() => route.query.date, (newDate) => {
 }
 
 .story-summary {
-  max-width: 62ch;
+  max-width: 100%;
   margin: 18px 0 0;
   color: var(--ink-body);
   font-size: 16px;

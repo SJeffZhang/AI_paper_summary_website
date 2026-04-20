@@ -29,7 +29,7 @@
         </div>
 
         <p class="eyebrow">{{ paper.issue_date }}</p>
-        <h1 class="article-title serif-title">
+        <h1 class="article-title serif-title" :class="{ 'article-title-en': lang === 'en' }">
           {{ lang === 'cn' ? paper.title_zh : paper.title_original }}
         </h1>
         <p class="article-subtitle">
@@ -277,15 +277,21 @@ watch(
 
 .article-title {
   margin: 12px 0 0;
-  max-width: 16ch;
+  max-width: 100%;
   color: var(--ink-strong);
-  font-size: clamp(42px, 5vw, 68px);
+  font-size: clamp(38px, 4.4vw, 60px);
+  line-height: 1.02;
+}
+
+.article-title-en {
+  max-width: 100%;
+  font-size: clamp(40px, 4.6vw, 64px);
   line-height: 0.98;
 }
 
 .article-subtitle {
   margin: 16px 0 0;
-  max-width: 52ch;
+  max-width: max;
   color: var(--ink-muted);
   font-size: 16px;
   line-height: 1.8;
