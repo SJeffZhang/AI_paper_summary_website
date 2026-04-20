@@ -39,7 +39,7 @@
         <div class="article-facts">
           <div class="fact-block interactive-lift">
             <span>{{ lang === 'cn' ? '作者' : 'Authors' }}</span>
-            <strong>{{ formatAuthors(paper.authors) || '--' }}</strong>
+            <strong :title="getAuthorTooltip(paper.authors)">{{ formatAuthors(paper.authors) || '--' }}</strong>
           </div>
           <div class="fact-block interactive-lift">
             <span>{{ lang === 'cn' ? '作者单位' : 'Affiliations' }}</span>
@@ -143,10 +143,24 @@ async function fetchDetail(id) {
 }
 
 function formatAuthors(authors = []) {
+  const authorNames = authors
+    .map((author) => (typeof author === 'string' ? author : author.name))
+    .filter(Boolean)
+
+  if (authorNames.length <= 3) {
+    return authorNames.join(', ')
+  }
+
+  const lead = authorNames.slice(0, 3).join(', ')
+  const remaining = authorNames.length - 3
+  return lang.value === 'cn' ? `${lead} 等 ${remaining} 位作者` : `${lead} +${remaining} more`
+}
+
+function getAuthorTooltip(authors = []) {
   return authors
     .map((author) => (typeof author === 'string' ? author : author.name))
     .filter(Boolean)
-    .join(', ')
+    .join('\n')
 }
 
 function getCategoryLabel(category) {
@@ -177,13 +191,13 @@ function getAffiliationLabel(paperData) {
   if (affiliations.length === 0) {
     return lang.value === 'cn' ? '论文源未提供作者单位' : 'Affiliation not provided by the source'
   }
-  if (affiliations.length <= 2) {
+  if (affiliations.length <= 3) {
     return affiliations.join(' / ')
   }
 
-  const lead = affiliations.slice(0, 2).join(' / ')
-  const remaining = affiliations.length - 2
-  return lang.value === 'cn' ? `${lead} 等 ${affiliations.length} 家机构` : `${lead} +${remaining} more`
+  const lead = affiliations.slice(0, 3).join(' / ')
+  const remaining = affiliations.length - 3
+  return lang.value === 'cn' ? `${lead} 等 ${remaining} 家机构` : `${lead} +${remaining} more`
 }
 
 function getAffiliationTooltip(paperData) {
