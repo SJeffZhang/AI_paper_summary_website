@@ -29,6 +29,15 @@
         </nav>
 
         <div class="shell-actions desktop-only">
+          <button
+            class="theme-toggle secondary-button interactive-press"
+            type="button"
+            :aria-label="themeToggleLabel"
+            @click="toggleTheme"
+          >
+            <el-icon :size="16"><component :is="themeIcon" /></el-icon>
+            <span>{{ themeToggleShortLabel }}</span>
+          </button>
           <div class="lang-pill" role="tablist" :aria-label="lang === 'cn' ? '语言切换' : 'Language switch'">
             <button
               type="button"
@@ -120,6 +129,14 @@
           >
             <span>{{ lang === 'cn' ? '分类页' : 'Topics' }}</span>
             <small>{{ lang === 'cn' ? '按方向查看历史精选' : 'Browse the archive by research track' }}</small>
+          </button>
+        </div>
+
+        <div class="drawer-block">
+          <p class="eyebrow">{{ lang === 'cn' ? '主题' : 'Theme' }}</p>
+          <button class="theme-toggle secondary-button interactive-press" type="button" @click="toggleTheme">
+            <el-icon :size="16"><component :is="themeIcon" /></el-icon>
+            <span>{{ themeToggleLabel }}</span>
           </button>
         </div>
 
@@ -222,7 +239,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Close, Menu, Message } from '@element-plus/icons-vue'
+import { Close, Menu, Message, Moon, Sunny } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 
 import { subscribeEmail } from './api/papers'
@@ -242,7 +259,25 @@ function readStoredLang() {
   return 'cn'
 }
 
+function readStoredTheme() {
+  try {
+    if (typeof window !== 'undefined' && typeof window.localStorage?.getItem === 'function') {
+      const stored = window.localStorage.getItem('theme')
+      if (stored === 'dark' || stored === 'light') {
+        return stored
+      }
+    }
+    if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+    }
+  } catch (error) {
+    return 'light'
+  }
+  return 'light'
+}
+
 const lang = ref(readStoredLang())
+const theme = ref(readStoredTheme())
 provide('lang', lang)
 
 const subscribeDialogVisible = ref(false)
@@ -256,6 +291,17 @@ const subscribeForm = reactive({
 })
 
 const isTopicRoute = computed(() => route.path.startsWith('/topics') || route.path.startsWith('/topic/'))
+const themeIcon = computed(() => (theme.value === 'dark' ? Sunny : Moon))
+const themeToggleLabel = computed(() =>
+  theme.value === 'dark'
+    ? (lang.value === 'cn' ? '切换到浅色模式' : 'Switch to light mode')
+    : (lang.value === 'cn' ? '切换到黑夜模式' : 'Switch to dark mode')
+)
+const themeToggleShortLabel = computed(() =>
+  theme.value === 'dark'
+    ? (lang.value === 'cn' ? '浅色' : 'Light')
+    : (lang.value === 'cn' ? '黑夜' : 'Dark')
+)
 
 const emailMessages = computed(() => ({
   required: lang.value === 'cn' ? '请输入邮箱地址' : 'Please enter an email',
@@ -275,6 +321,21 @@ function handleLangChange(nextLang) {
     window.localStorage.setItem('lang', nextLang)
   }
   applyPageTitle(route, nextLang)
+}
+
+function applyTheme(nextTheme) {
+  if (typeof document !== 'undefined') {
+    document.documentElement.dataset.theme = nextTheme
+    document.documentElement.style.colorScheme = nextTheme
+  }
+}
+
+function toggleTheme() {
+  theme.value = theme.value === 'dark' ? 'light' : 'dark'
+  if (typeof window !== 'undefined' && typeof window.localStorage?.setItem === 'function') {
+    window.localStorage.setItem('theme', theme.value)
+  }
+  applyTheme(theme.value)
 }
 
 function navigateHome() {
@@ -323,6 +384,7 @@ watch(mobileNavOpen, async (isOpen) => {
 })
 
 onMounted(() => {
+  applyTheme(theme.value)
   applyPageTitle(route, lang.value)
   window.addEventListener('keydown', handleEscape)
 })
@@ -438,7 +500,7 @@ async function handleSubscribe() {
 .nav-link.active,
 .nav-link:hover {
   color: var(--ink-strong);
-  background: rgba(196, 111, 60, 0.1);
+  background: var(--accent-soft);
 }
 
 .shell-actions {
@@ -447,12 +509,19 @@ async function handleSubscribe() {
   gap: 12px;
 }
 
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
 .lang-pill {
   display: inline-flex;
   padding: 4px;
   border-radius: 999px;
   border: 1px solid var(--line-soft);
-  background: rgba(255, 250, 242, 0.84);
+  background: var(--panel-solid);
 }
 
 .lang-option {
@@ -464,8 +533,8 @@ async function handleSubscribe() {
 }
 
 .lang-option.active {
-  background: var(--ink-strong);
-  color: #fffaf2;
+  background: var(--button-primary-bg);
+  color: var(--button-primary-text);
 }
 
 .subscribe-button {
@@ -548,7 +617,7 @@ async function handleSubscribe() {
   justify-content: center;
   border-radius: 50%;
   color: var(--ink-strong);
-  background: rgba(255, 250, 242, 0.7);
+  background: var(--panel-solid);
   border: 1px solid var(--line-soft);
   cursor: pointer;
   flex-shrink: 0;
@@ -574,7 +643,7 @@ async function handleSubscribe() {
   inset: 0;
   z-index: 39;
   border: 0;
-  background: rgba(34, 29, 23, 0.22);
+  background: var(--overlay-bg);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   cursor: pointer;
@@ -616,7 +685,7 @@ async function handleSubscribe() {
   padding: 16px;
   border-radius: 20px;
   border: 1px solid var(--line-soft);
-  background: rgba(255, 250, 242, 0.7);
+  background: var(--panel-solid);
 }
 
 .drawer-link {
@@ -640,8 +709,8 @@ async function handleSubscribe() {
 }
 
 .drawer-link.active {
-  border-color: rgba(196, 111, 60, 0.24);
-  background: rgba(196, 111, 60, 0.1);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
 }
 
 .drawer-block {
@@ -649,6 +718,10 @@ async function handleSubscribe() {
 }
 
 .drawer-block .lang-pill {
+  margin-top: 14px;
+}
+
+.drawer-block .theme-toggle {
   margin-top: 14px;
 }
 

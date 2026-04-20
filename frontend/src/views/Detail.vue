@@ -297,7 +297,7 @@ watch(
 .fact-block {
   padding: 16px;
   border-radius: 18px;
-  background: rgba(255, 250, 242, 0.72);
+  background: var(--panel-soft);
   border: 1px solid var(--line-soft);
 }
 

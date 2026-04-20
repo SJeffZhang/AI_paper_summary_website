@@ -626,8 +626,8 @@ watch(() => route.query.date, (newDate) => {
   padding: 24px;
   border-radius: calc(var(--radius-xl) - 4px);
   background:
-    linear-gradient(180deg, rgba(255, 251, 244, 0.8), rgba(240, 228, 210, 0.9)),
-    radial-gradient(circle at top right, rgba(196, 111, 60, 0.18), transparent 42%);
+    var(--poster-gradient),
+    var(--poster-glow);
   border: 1px solid rgba(83, 69, 54, 0.1);
   transition: transform var(--motion-smooth) var(--ease-smooth), box-shadow var(--motion-smooth) var(--ease-smooth);
 }
@@ -647,7 +647,7 @@ watch(() => route.query.date, (newDate) => {
 .poster-metric {
   padding: 14px;
   border-radius: 18px;
-  background: rgba(255, 250, 242, 0.82);
+  background: var(--panel-strong);
   border: 1px solid rgba(83, 69, 54, 0.1);
 }
 
@@ -771,8 +771,8 @@ watch(() => route.query.date, (newDate) => {
 
 .direction-chip:hover {
   color: var(--accent-deep);
-  border-color: rgba(196, 111, 60, 0.28);
-  background: rgba(196, 111, 60, 0.12);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
 }
 
 .story-score {
@@ -860,7 +860,7 @@ watch(() => route.query.date, (newDate) => {
 }
 
 .watching-row:hover {
-  background: rgba(255, 250, 242, 0.56);
+  background: var(--panel-hover);
 }
 
 .watching-meta {
@@ -947,7 +947,7 @@ watch(() => route.query.date, (newDate) => {
   height: 36px;
   border-radius: 50%;
   border: 1px solid var(--line-soft);
-  background: rgba(255, 250, 242, 0.7);
+  background: var(--panel-solid);
   color: var(--ink-body);
   cursor: pointer;
 }
@@ -979,7 +979,7 @@ watch(() => route.query.date, (newDate) => {
   height: 38px;
   border-radius: 12px;
   border: 1px solid transparent;
-  background: rgba(255, 250, 242, 0.92);
+  background: var(--panel-strong);
   color: var(--ink-body);
   cursor: pointer;
   transition: background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease;
@@ -991,18 +991,18 @@ watch(() => route.query.date, (newDate) => {
 }
 
 .calendar-cell.has-data {
-  background: rgba(196, 111, 60, 0.12);
+  background: var(--accent-soft);
 }
 
 .calendar-cell.no-data {
-  background: rgba(103, 92, 79, 0.08);
-  color: rgba(67, 58, 49, 0.44);
+  background: var(--calendar-muted-bg);
+  color: var(--calendar-muted-text);
 }
 
 .calendar-cell.selected {
-  background: var(--ink-strong);
-  color: #fffaf2;
-  border-color: var(--ink-strong);
+  background: var(--button-primary-bg);
+  color: var(--button-primary-text);
+  border-color: var(--button-primary-bg);
 }
 
 .calendar-cell.disabled {
@@ -1053,14 +1053,14 @@ watch(() => route.query.date, (newDate) => {
   padding: 12px 14px;
   border-radius: 16px;
   border: 1px solid var(--line-soft);
-  background: rgba(255, 250, 242, 0.68);
+  background: var(--panel-bg);
   color: var(--ink-body);
   cursor: pointer;
 }
 
 .recent-issue.active {
-  border-color: rgba(196, 111, 60, 0.34);
-  background: rgba(196, 111, 60, 0.1);
+  border-color: var(--accent-line-strong);
+  background: var(--accent-soft);
 }
 
 .recent-issue strong {
@@ -1151,7 +1151,7 @@ watch(() => route.query.date, (newDate) => {
     padding: 16px 18px;
     border-radius: 18px;
     border: 1px solid var(--line-soft);
-    background: rgba(255, 250, 242, 0.72);
+    background: var(--panel-soft);
     color: var(--ink-strong);
     cursor: pointer;
     list-style: none;

@@ -264,7 +264,7 @@ onMounted(fetchCandidates)
 .sources-stat {
   padding: 16px;
   border-radius: 18px;
-  background: rgba(255, 250, 242, 0.74);
+  background: var(--panel-soft);
   border: 1px solid var(--line-soft);
 }
 
@@ -441,7 +441,7 @@ onMounted(fetchCandidates)
     grid-template-columns: 1fr;
     gap: 14px;
     padding: 20px;
-    background: rgba(255, 250, 242, 0.48);
+    background: var(--panel-faint);
     border-radius: 22px;
     margin: 12px;
     border: 1px solid var(--line-soft);
