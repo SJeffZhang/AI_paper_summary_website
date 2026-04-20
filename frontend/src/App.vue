@@ -364,8 +364,6 @@ async function handleSubscribe() {
   top: 0;
   z-index: 30;
   padding: 20px 24px 0;
-  background: linear-gradient(180deg, rgba(247, 241, 231, 0.94), rgba(247, 241, 231, 0.62), transparent);
-  backdrop-filter: blur(16px);
 }
 
 .shell-header-inner,
@@ -375,12 +373,14 @@ async function handleSubscribe() {
 }
 
 .shell-header-inner {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 20px;
   padding: 14px 18px;
   border-radius: 999px;
+  isolation: isolate;
 }
 
 .brand-lockup,
