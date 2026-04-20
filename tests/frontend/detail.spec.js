@@ -37,6 +37,32 @@ describe('Detail view', () => {
     expect(wrapper.text()).not.toContain('候选池')
   })
 
+  it('shows only the first three authors and keeps the full list in the tooltip', async () => {
+    getPaperDetailMock.mockResolvedValue({
+      ...focusDetail,
+      authors: [
+        { name: 'Alice', affiliation: 'OpenAI' },
+        { name: 'Bob', affiliation: 'Stanford University' },
+        { name: 'Carol', affiliation: 'Google DeepMind' },
+        { name: 'Dave', affiliation: 'Anthropic' },
+      ],
+    })
+    const router = await createTestRouter('/paper/:id', '/paper/1', Detail)
+
+    const wrapper = mount(Detail, {
+      global: {
+        provide: { lang: ref('cn') },
+        plugins: [...testPlugins, router]
+      }
+    })
+
+    await flushPromises()
+
+    const authorBlock = wrapper.findAll('.fact-block strong')[0]
+    expect(authorBlock.text()).toBe('Alice, Bob, Carol 等 1 位作者')
+    expect(authorBlock.attributes('title')).toBe('Alice\nBob\nCarol\nDave')
+  })
+
   it('summarizes multiple affiliations and keeps the full list in the tooltip', async () => {
     getPaperDetailMock.mockResolvedValue({
       ...focusDetail,
@@ -44,8 +70,9 @@ describe('Detail view', () => {
       authors: [
         { name: 'Alice', affiliation: 'OpenAI' },
         { name: 'Bob', affiliation: 'Stanford University' },
-        { name: 'Carol', affiliation: 'OpenAI' },
+        { name: 'Carol', affiliation: 'Google DeepMind' },
         { name: 'Dave', affiliation: 'Google DeepMind' },
+        { name: 'Eve', affiliation: 'Anthropic' },
       ],
     })
     const router = await createTestRouter('/paper/:id', '/paper/1', Detail)
@@ -60,8 +87,8 @@ describe('Detail view', () => {
     await flushPromises()
 
     const affiliationBlock = wrapper.findAll('.fact-block strong')[1]
-    expect(affiliationBlock.text()).toBe('OpenAI / Stanford University 等 3 家机构')
-    expect(affiliationBlock.attributes('title')).toBe('OpenAI\nStanford University\nGoogle DeepMind')
+    expect(affiliationBlock.text()).toBe('OpenAI / Stanford University / Google DeepMind 等 1 家机构')
+    expect(affiliationBlock.attributes('title')).toBe('OpenAI\nStanford University\nGoogle DeepMind\nAnthropic')
   })
 
   it('shows an explicit fallback when the source does not provide affiliations', async () => {
