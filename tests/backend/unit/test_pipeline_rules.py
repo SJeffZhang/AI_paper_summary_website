@@ -6,6 +6,7 @@ import pytest
 from app.core.config import settings
 from app.models.domain import Paper, PaperAITrace, PaperSummary, SystemTaskLog
 from app.services.ai_processor import StructuredOutputError
+import app.services.pipeline as pipeline_module
 from app.services.pipeline import Pipeline
 
 
@@ -696,7 +697,7 @@ def test_refresh_selected_titles_updates_all_issue_fallbacks(db_session):
     db_session.commit()
 
     pipeline = Pipeline(db_session)
-    pipeline.ai_processor.localize_titles = lambda papers, batch_size=None: {
+    pipeline.ai_processor.localize_titles = lambda papers, batch_size=None, progress_callback=None: {
         paper["arxiv_id"]: (
             "面向生产的智能体规划"
             if paper["arxiv_id"] == "2603.00001"
@@ -712,6 +713,63 @@ def test_refresh_selected_titles_updates_all_issue_fallbacks(db_session):
     assert updated == 2
     assert focus_paper.title_zh == "面向生产的智能体规划"
     assert candidate_paper.title_zh == "长周期训练信号"
+
+
+def test_refresh_selected_titles_emits_batch_progress_logs(db_session, monkeypatch):
+    issue_date = Pipeline._resolve_issue_date("2026-03-27")
+    papers = [
+        Paper(
+            arxiv_id=f"2603.1000{index}",
+            title_zh=f"待翻译：Title {index}",
+            title_original=f"Title {index}",
+            authors=[{"name": f"Author {index}", "affiliation": "OpenAI"}],
+            venue="arXiv",
+            abstract="demo",
+            pdf_url=f"https://arxiv.org/pdf/2603.1000{index}.pdf",
+            upvotes=index,
+            arxiv_publish_date=Pipeline._resolve_issue_date("2026-03-24"),
+        )
+        for index in range(1, 4)
+    ]
+    db_session.add_all(papers)
+    db_session.flush()
+    db_session.add_all(
+        [
+            PaperSummary(
+                paper_id=paper.id,
+                issue_date=issue_date,
+                score=50,
+                score_reasons={},
+                category="candidate",
+                candidate_reason="low_score",
+                direction="Agent",
+            )
+            for paper in papers
+        ]
+    )
+    db_session.commit()
+
+    logs = []
+    monkeypatch.setattr(settings, "KIMI_TITLE_BATCH_SIZE", 2)
+    monkeypatch.setattr(pipeline_module, "_safe_progress_log", logs.append)
+
+    pipeline = Pipeline(db_session)
+
+    def fake_localize_titles(payload, batch_size=None, progress_callback=None):
+        if progress_callback is not None:
+            progress_callback(1, 2, 2)
+            progress_callback(2, 2, 1)
+        return {paper["arxiv_id"]: f"中文标题 {paper['arxiv_id']}" for paper in payload}
+
+    pipeline.ai_processor.localize_titles = fake_localize_titles
+
+    updated = pipeline._refresh_selected_titles(issue_date)
+
+    assert updated == 3
+    assert logs == [
+        "[pipeline][title-refresh] issue_date=2026-03-27 batch=1/2 size=2 total=3",
+        "[pipeline][title-refresh] issue_date=2026-03-27 batch=2/2 size=1 total=3",
+    ]
 
 
 def test_run_ai_batch_persists_editor_writer_and_reviewer_traces(db_session):
@@ -788,6 +846,83 @@ def test_run_ai_batch_persists_editor_writer_and_reviewer_traces(db_session):
     assert [trace.stage for trace in traces] == ["editor", "writer", "reviewer"]
     assert traces[2].stage_status == "accepted"
     assert traces[1].content.startswith("## [2503.22001]")
+
+
+def test_run_ai_batch_emits_stage_progress_logs(db_session, monkeypatch):
+    paper = Paper(
+        arxiv_id="2503.22003",
+        title_zh="测试标题三",
+        title_original="Test Title Three",
+        authors=[{"name": "Cara", "affiliation": "OpenAI"}],
+        venue="ICLR 2026",
+        abstract="Test abstract",
+        pdf_url="https://arxiv.org/pdf/2503.22003.pdf",
+        upvotes=10,
+        arxiv_publish_date=Pipeline._resolve_issue_date("2026-03-20"),
+    )
+    db_session.add(paper)
+    db_session.flush()
+
+    summary = PaperSummary(
+        paper_id=paper.id,
+        issue_date=Pipeline._resolve_issue_date("2026-03-23"),
+        score=95,
+        score_reasons={},
+        category="focus",
+        candidate_reason=None,
+        direction="Agent",
+    )
+    db_session.add(summary)
+    db_session.flush()
+
+    logs = []
+    monkeypatch.setattr(pipeline_module, "_safe_progress_log", logs.append)
+
+    pipeline = Pipeline(db_session)
+    pipeline.ai_processor.run_editor = lambda papers, category: "editor-output"
+    pipeline.ai_processor.parse_editor_records = lambda output, papers: [
+        {
+            "arxiv_id": "2503.22003",
+            "writing_angle": "生产落地",
+            "core_problem": "推理链路不稳",
+            "solution": "统一编排",
+            "content": "## 论文: [2503.22003]\n- **写作角度**: 生产落地",
+        }
+    ]
+    pipeline.ai_processor.run_writer = lambda editor_brief, papers_metadata, category, history=None: "writer-output"
+    pipeline.ai_processor.parse_writer_records = lambda writer_output, papers_metadata, category: [
+        {
+            "arxiv_id": "2503.22003",
+            "one_line_summary": "中文总结",
+            "one_line_summary_en": "English summary",
+            "core_highlights": ["亮点一", "亮点二", "亮点三"],
+            "core_highlights_en": ["Point 1", "Point 2", "Point 3"],
+            "application_scenarios": "中文场景",
+            "application_scenarios_en": "English scenario",
+            "content": "## [2503.22003]\n- **一句话总结**: 中文总结",
+        }
+    ]
+    pipeline.ai_processor.run_reviewer = lambda writer_output: {
+        "status": "PASSED",
+        "rejected_ids": [],
+        "raw_output": "- **整体结论**: PASSED\n- **拒绝名单**: []",
+    }
+
+    results, rejected_ids = pipeline._run_ai_batch(
+        [{"arxiv_id": "2503.22003", "_summary": summary}],
+        "focus",
+    )
+
+    assert rejected_ids == []
+    assert results[0]["one_line_summary"] == "中文总结"
+    assert logs == [
+        "[pipeline][focus][2503.22003][editor] start attempt=1",
+        "[pipeline][focus][2503.22003][editor] generated attempt=1",
+        "[pipeline][focus][2503.22003][writer] start attempt=1",
+        "[pipeline][focus][2503.22003][writer] generated attempt=1",
+        "[pipeline][focus][2503.22003][reviewer] start attempt=1",
+        "[pipeline][focus][2503.22003][reviewer] accepted attempt=1",
+    ]
 
 
 def test_run_ai_batch_persists_invalid_attempt_traces(db_session):
@@ -1003,7 +1138,7 @@ def test_run_requeues_full_agent_pipeline_after_reviewer_rejections_until_succes
     reviewer_calls = {"count": 0}
 
     pipeline.ai_processor.localize_title = lambda paper: "评审重排论文"
-    pipeline.ai_processor.localize_titles = lambda papers, batch_size=None: {
+    pipeline.ai_processor.localize_titles = lambda papers, batch_size=None, progress_callback=None: {
         paper["arxiv_id"]: "评审重排论文" for paper in papers
     }
 
@@ -1217,7 +1352,7 @@ def test_run_persists_full_daily_snapshot_for_candidate_pool(db_session):
     }
 
     pipeline.ai_processor.localize_title = lambda paper: f"中文标题 {paper['arxiv_id']}"
-    pipeline.ai_processor.localize_titles = lambda papers, batch_size=None: {
+    pipeline.ai_processor.localize_titles = lambda papers, batch_size=None, progress_callback=None: {
         paper["arxiv_id"]: f"候选中文标题 {paper['arxiv_id']}" for paper in papers
     }
     pipeline._run_ai_batch = lambda papers, category: (

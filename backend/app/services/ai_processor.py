@@ -3,7 +3,7 @@ import os
 import re
 import time
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from openai import APIConnectionError, APIError, APITimeoutError, AuthenticationError, OpenAI, PermissionDeniedError, RateLimitError
 
@@ -230,7 +230,12 @@ class AIProcessor:
     def localize_title(self, paper: Dict[str, Any]) -> str:
         return self.localize_titles([paper])[paper["arxiv_id"]]
 
-    def localize_titles(self, papers: Sequence[Dict[str, Any]], batch_size: Optional[int] = None) -> Dict[str, str]:
+    def localize_titles(
+        self,
+        papers: Sequence[Dict[str, Any]],
+        batch_size: Optional[int] = None,
+        progress_callback: Optional[Callable[[int, int, int], None]] = None,
+    ) -> Dict[str, str]:
         localized_titles: Dict[str, str] = {}
         pending: List[Dict[str, Any]] = []
         for paper in papers:
@@ -254,8 +259,11 @@ class AIProcessor:
 
         effective_batch_size = max(1, int(batch_size or settings.KIMI_TITLE_BATCH_SIZE or 1))
         max_localize_attempts = max(1, int(settings.KIMI_TITLE_LOCALIZATION_ATTEMPTS or 1))
+        total_batches = max(1, (len(pending) + effective_batch_size - 1) // effective_batch_size)
         for start in range(0, len(pending), effective_batch_size):
             batch = list(pending[start:start + effective_batch_size])
+            if progress_callback is not None:
+                progress_callback((start // effective_batch_size) + 1, total_batches, len(batch))
             prompt_lines = [
                 "请把以下英文论文标题翻译成简洁、自然、面向中文技术读者的中文标题。",
                 "保留模型名、数据集名、框架名、缩写和关键专有名词，不要添加编号或解释。",
