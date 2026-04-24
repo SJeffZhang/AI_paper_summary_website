@@ -13,8 +13,8 @@
           <p class="sources-copy">
             {{
               lang === 'cn'
-                ? '展示当日前 50 篇进入评分引擎的论文、加分项、分层结果与未入选原因。'
-                : 'A complete audit surface of scored papers, signals, tier assignment, and non-selection reasons.'
+                ? '展示当天全部进入评分引擎的论文、加分项、分层结果与未入选原因，每页 50 条。'
+                : 'A paginated audit surface of all scored papers, signals, tier assignment, and non-selection reasons, 50 per page.'
             }}
           </p>
         </div>

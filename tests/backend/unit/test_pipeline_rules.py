@@ -1196,7 +1196,7 @@ def test_quantity_first_pipeline_uses_full_snapshots_and_standard_ai_batches(db_
     assert sum(1 for summary in summaries if summary.category == "watching") == 6
 
 
-def test_run_truncates_daily_snapshot_to_top_50(db_session):
+def test_run_persists_full_daily_snapshot_for_candidate_pool(db_session):
     pipeline = Pipeline(db_session)
     raw_ids = [f"paper-{index:02d}" for index in range(60)]
     score_map = {paper_id: 200 - index for index, paper_id in enumerate(raw_ids)}
@@ -1252,13 +1252,14 @@ def test_run_truncates_daily_snapshot_to_top_50(db_session):
     )
 
     snapshot_ids = {arxiv_id for _, arxiv_id in summaries}
-    expected_ids = set(raw_ids[:50])
+    expected_ids = set(raw_ids)
 
     assert task_log.status == "SUCCESS"
     assert task_log.fetched_count == 60
     assert task_log.processed_count == 5
-    assert len(summaries) == 50
+    assert len(summaries) == 60
     assert snapshot_ids == expected_ids
-    assert "paper-50" not in snapshot_ids
+    assert "paper-50" in snapshot_ids
+    assert "paper-59" in snapshot_ids
     assert sum(1 for summary, _ in summaries if summary.category == "focus") == 5
-    assert sum(1 for summary, _ in summaries if summary.category == "candidate") == 45
+    assert sum(1 for summary, _ in summaries if summary.category == "candidate") == 55
