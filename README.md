@@ -1,6 +1,6 @@
 # ArxivDaily
 
-面向 AI 开发者的双语论文日报系统。 在线平台：<arXivDaily.tech>
+面向 AI 开发者的双语论文日报系统。 在线平台：[arXivDaily.tech](arXivDaily.tech)
 
 它不是简单的论文聚合页，而是一条完整的生产链：抓取真实论文源，按规则打分筛选，对入选论文生成中文标题和双语解读，按 `issue_date` 快照落库，并通过 Web 界面和邮件日报对外分发。
 
