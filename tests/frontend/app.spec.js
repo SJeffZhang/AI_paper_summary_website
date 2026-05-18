@@ -14,8 +14,23 @@ import App from '../../frontend/src/App.vue'
 
 describe('App shell', () => {
   beforeEach(() => {
+    const storage = {}
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem: (key) => (key in storage ? storage[key] : null),
+        setItem: (key, value) => {
+          storage[key] = String(value)
+        },
+        removeItem: (key) => {
+          delete storage[key]
+        },
+      },
+    })
     subscribeEmailMock.mockReset()
-    window.localStorage?.setItem?.('lang', 'cn')
+    window.localStorage.setItem('lang', 'cn')
+    window.localStorage.removeItem('theme')
+    delete document.documentElement.dataset.theme
   })
 
   it('opens the mobile drawer and routes to topics', async () => {
@@ -79,5 +94,34 @@ describe('App shell', () => {
     await router.push('/topics')
     await flushPromises()
     expect(document.title).toBe('Topics')
+  })
+
+  it('toggles dark mode and persists the theme choice', async () => {
+    const HomeStub = { template: '<div>home stub</div>' }
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', name: 'home', component: HomeStub },
+      ],
+    })
+
+    await router.push('/')
+    await router.isReady()
+
+    const wrapper = mount(App, {
+      global: {
+        plugins: [ElementPlus, router],
+      },
+    })
+
+    expect(document.documentElement.dataset.theme).toBe('light')
+
+    await wrapper.find('.theme-toggle').trigger('click')
+    expect(document.documentElement.dataset.theme).toBe('dark')
+    expect(window.localStorage.getItem('theme')).toBe('dark')
+
+    await wrapper.find('.theme-toggle').trigger('click')
+    expect(document.documentElement.dataset.theme).toBe('light')
+    expect(window.localStorage.getItem('theme')).toBe('light')
   })
 })
