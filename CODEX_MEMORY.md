@@ -1088,3 +1088,16 @@ When continuing work in this repository, read this file first.
   - frontend: `cd frontend && npm run test:run` -> `18 passed`.
   - frontend: `cd frontend && npm run build` -> passed; existing large-chunk warning remains non-blocking.
 - User instruction: do not push this merge until separately requested.
+
+## LLM Usage Reconciliation (2026-08-15)
+- `LLM_USAGE_LOG_PATH` optionally writes one local JSONL event per successful non-streaming LLM response, containing only provider-reported numeric token counts, model, mode, and timestamp. It never records prompts, completions, or credentials.
+- `backend/scripts/summarize_llm_usage.py --path <jsonl>` aggregates raw provider usage for a single run; use a distinct temporary path for each billing test.
+- Local 2026-08-13 full-pipeline billing run completed successfully: fetched 138, processed 14, categories focus=5/watching=9/candidate=124, with 96 successful DeepSeek calls. Provider-reported usage was 35,072 cached-input, 39,865 uncached-input, and 21,914 output tokens (96,851 total). At the pre-2026-08-16 DeepSeek V4 Flash rates, the computed cost is USD 0.011815; verify the pricing page before future comparisons because rates change on 2026-08-16 16:00 UTC.
+- The initial 2026-08-13 full-pipeline billing run deliberately inherited `AFFILIATION_ENRICH_ENABLED=false`, so it did not exercise institution extraction. A subsequent scoped `backfill_affiliations.py --start-date 2026-08-13 --end-date 2026-08-13 --apply` run processed only the 14 Focus/Watching papers: 12 persisted validated paper-level institution lists and 2 remained empty after validation/retry failure. Treat this backfill as the institution phase for that date.
+
+## Production Institution Enrichment (2026-08-15)
+- The daily pipeline now enables paper-level institution extraction by default and production deployment writes `AFFILIATION_ENRICH_ENABLED=true` independently of GitHub Environment secrets. This ensures server syncs run enrichment without requiring a secret update.
+- Only selected Focus/Watching papers are processed. Each paper emits start/end progress logs; a PDF, extraction, or LLM failure is isolated to that paper and cannot fail the daily summary pipeline. Local development may still set `AFFILIATION_ENRICH_ENABLED=false` in `backend/.env`.
+
+## Institution Display (2026-08-15)
+- Detail-page paper-level institution lists use a comma-and-space separator instead of a slash. The full list remains available as newline-separated tooltip text.

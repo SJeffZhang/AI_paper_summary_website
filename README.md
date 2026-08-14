@@ -151,7 +151,7 @@
 
 ### 论文级机构补全
 
-后端可以在每日流水线中仅对入选 `focus` / `watching` 的论文，基于论文 PDF 首页补全论文级 `paper.affiliations` 机构列表。该能力默认关闭，避免本地开发、测试或探测期号时触发大量 PDF 下载和 LLM 调用；生产环境可通过 `AFFILIATION_ENRICH_ENABLED=true` 启用。
+后端会在每日流水线中仅对入选 `focus` / `watching` 的论文，基于论文 PDF 首页补全论文级 `paper.affiliations` 机构列表。生产部署固定启用；本地如需跳过，可在 `backend/.env` 设置 `AFFILIATION_ENRICH_ENABLED=false`。
 
 补全流程：
 

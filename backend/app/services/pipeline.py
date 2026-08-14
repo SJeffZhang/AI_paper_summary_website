@@ -197,14 +197,33 @@ class Pipeline:
             return
 
         selected_papers = list(focus_selected) + list(watching_selected)
-        for paper in selected_papers:
-            result = self.affiliation_enricher.enrich_paper(paper)
+        total = len(selected_papers)
+        for index, paper in enumerate(selected_papers, start=1):
+            arxiv_id = str(paper.get("arxiv_id") or "")
+            _safe_progress_log(f"[pipeline][affiliation] {index}/{total} start arxiv_id={arxiv_id}")
+            try:
+                result = self.affiliation_enricher.enrich_paper(paper)
+            except Exception as exc:
+                # Institution enrichment is supplementary; do not block daily publication.
+                paper["affiliation_enrich_status"] = "failed"
+                paper["affiliation_enrich_reasons"] = [str(exc)]
+                _safe_progress_log(
+                    f"[pipeline][affiliation] {index}/{total} failed arxiv_id={arxiv_id} error={exc}"
+                )
+                continue
             paper["affiliation_enrich_status"] = result.status
             paper["affiliation_enrich_attempts"] = result.attempts
             if result.reasons:
                 paper["affiliation_enrich_reasons"] = result.reasons
             if result.status == "overwrite_applied":
                 paper["affiliations"] = result.affiliations
+            _safe_progress_log(
+                (
+                    f"[pipeline][affiliation] {index}/{total} done arxiv_id={arxiv_id} "
+                    f"status={result.status} attempts={result.attempts} "
+                    f"affiliation_count={len(result.affiliations)}"
+                )
+            )
 
     def _start_task(self, issue_date: date) -> SystemTaskLog:
         task_log = self.db.query(SystemTaskLog).filter(SystemTaskLog.issue_date == issue_date).first()

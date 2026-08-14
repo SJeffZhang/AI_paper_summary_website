@@ -194,10 +194,10 @@ function getAffiliationLabel(paperData) {
     return lang.value === 'cn' ? '未识别到论文机构' : 'Institutions not identified'
   }
   if (affiliations.length <= 3) {
-    return affiliations.join(' / ')
+    return affiliations.join(', ')
   }
 
-  const lead = affiliations.slice(0, 3).join(' / ')
+  const lead = affiliations.slice(0, 3).join(', ')
   const remaining = affiliations.length - 3
   return lang.value === 'cn' ? `${lead} 等 ${remaining} 家机构` : `${lead} +${remaining} more`
 }

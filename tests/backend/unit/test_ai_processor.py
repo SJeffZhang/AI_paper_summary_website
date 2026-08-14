@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from types import SimpleNamespace
 
@@ -593,6 +595,41 @@ def test_call_llm_uses_non_streaming_for_longform(monkeypatch):
     monkeypatch.setattr(processor, "_respect_request_interval", lambda longform: None)
 
     assert processor._call_llm("system", "user", longform=True) == "hello world"
+
+
+def test_call_llm_records_provider_usage_for_successful_response(monkeypatch, tmp_path):
+    processor = AIProcessor(api_key="test-key")
+    usage_path = tmp_path / "usage.jsonl"
+
+    class FakeClient:
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**kwargs):
+                    return SimpleNamespace(
+                        model="deepseek-v4-flash",
+                        choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))],
+                        usage=SimpleNamespace(
+                            prompt_tokens=100,
+                            completion_tokens=20,
+                            total_tokens=120,
+                            prompt_cache_hit_tokens=40,
+                            prompt_cache_miss_tokens=60,
+                            completion_tokens_details=SimpleNamespace(reasoning_tokens=0),
+                        ),
+                    )
+
+    monkeypatch.setattr(settings, "LLM_USAGE_LOG_PATH", str(usage_path))
+    monkeypatch.setattr(processor, "_get_client", lambda timeout_seconds: FakeClient())
+    monkeypatch.setattr(processor, "_respect_request_interval", lambda longform: None)
+
+    assert processor._call_llm("system", "user") == "ok"
+    event = json.loads(usage_path.read_text(encoding="utf-8"))
+    assert event["model"] == "deepseek-v4-flash"
+    assert event["prompt_tokens"] == 100
+    assert event["completion_tokens"] == 20
+    assert event["prompt_cache_hit_tokens"] == 40
+    assert event["prompt_cache_miss_tokens"] == 60
 
 
 def test_call_llm_preserves_explicit_temperature(monkeypatch):

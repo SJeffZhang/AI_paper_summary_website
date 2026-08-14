@@ -88,7 +88,7 @@ describe('Detail view', () => {
     await flushPromises()
 
     const affiliationBlock = wrapper.findAll('.fact-block strong')[1]
-    expect(affiliationBlock.text()).toBe('OpenAI / Stanford University / Google DeepMind')
+    expect(affiliationBlock.text()).toBe('OpenAI, Stanford University, Google DeepMind')
     expect(affiliationBlock.attributes('title')).toBe('OpenAI\nStanford University\nGoogle DeepMind')
   })
 

@@ -2,6 +2,8 @@ import json
 import os
 import re
 import time
+from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -81,12 +83,13 @@ class AIProcessor:
                 "thinking": {"type": "enabled" if settings.LLM_THINKING_ENABLED else "disabled"}
             }
 
+        should_stream = self._should_stream(longform=longform, response_format=response_format)
         max_attempts = self._max_retry_attempts(longform)
         last_error: Optional[Exception] = None
         for attempt in range(max_attempts):
             try:
                 self._respect_request_interval(longform)
-                if self._should_stream(longform=longform, response_format=response_format):
+                if should_stream:
                     content = self._collect_streamed_content(client.chat.completions.create(stream=True, **payload))
                 else:
                     completion = client.chat.completions.create(**payload)
@@ -97,6 +100,8 @@ class AIProcessor:
                         raise RuntimeError("LLM returned empty content after retries.") from last_error
                     time.sleep(self._retry_backoff_seconds(attempt, longform, reason="empty"))
                     continue
+                if not should_stream:
+                    self._record_usage(completion, longform=longform)
                 return content
             except (AuthenticationError, PermissionDeniedError) as exc:
                 raise RuntimeError("LLM authentication failed. Check DEEPSEEK_API_KEY permissions and validity.") from exc
@@ -118,6 +123,46 @@ class AIProcessor:
                 time.sleep(self._retry_backoff_seconds(attempt, longform, reason="api_error"))
 
         raise RuntimeError("LLM request failed without a recoverable response.") from last_error
+
+    @staticmethod
+    def _record_usage(completion: Any, *, longform: bool) -> None:
+        """Persist numeric provider usage for local billing reconciliation only."""
+        log_path = str(settings.LLM_USAGE_LOG_PATH or "").strip()
+        usage = getattr(completion, "usage", None)
+        if not log_path or usage is None:
+            return
+
+        def get_value(source: Any, field: str) -> int:
+            value = source.get(field) if isinstance(source, dict) else getattr(source, field, None)
+            try:
+                return int(value or 0)
+            except (TypeError, ValueError):
+                return 0
+
+        details = (
+            usage.get("completion_tokens_details")
+            if isinstance(usage, dict)
+            else getattr(usage, "completion_tokens_details", None)
+        )
+        event = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "model": str(getattr(completion, "model", None) or settings.LLM_MODEL),
+            "longform": longform,
+            "prompt_tokens": get_value(usage, "prompt_tokens"),
+            "completion_tokens": get_value(usage, "completion_tokens"),
+            "total_tokens": get_value(usage, "total_tokens"),
+            "prompt_cache_hit_tokens": get_value(usage, "prompt_cache_hit_tokens"),
+            "prompt_cache_miss_tokens": get_value(usage, "prompt_cache_miss_tokens"),
+            "reasoning_tokens": get_value(details, "reasoning_tokens"),
+        }
+        try:
+            path = Path(log_path).expanduser()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
+        except OSError:
+            # Metering must not interrupt a successful pipeline run.
+            return
 
     def _get_client(self, timeout_seconds: int) -> OpenAI:
         client = self._clients.get(timeout_seconds)

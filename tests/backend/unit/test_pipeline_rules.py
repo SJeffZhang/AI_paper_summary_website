@@ -1136,6 +1136,31 @@ def test_affiliation_enrichment_only_runs_for_selected_focus_and_watching(db_ses
     assert "affiliations" not in candidate
 
 
+def test_affiliation_enrichment_failure_does_not_block_other_selected_papers(db_session, monkeypatch):
+    pipeline = Pipeline(db_session)
+
+    class FakeAffiliationEnricher:
+        def enrich_paper(self, paper):
+            if paper["arxiv_id"] == "broken-paper":
+                raise RuntimeError("pdf download failed")
+            return AffiliationEnrichmentResult(
+                status="overwrite_applied",
+                affiliations=["OpenAI"],
+                attempts=1,
+            )
+
+    pipeline.affiliation_enricher = FakeAffiliationEnricher()
+    monkeypatch.setattr("app.services.pipeline.settings.AFFILIATION_ENRICH_ENABLED", True)
+    broken = {"arxiv_id": "broken-paper"}
+    valid = {"arxiv_id": "valid-paper"}
+
+    pipeline._enrich_selected_affiliations([broken], [valid])
+
+    assert broken["affiliation_enrich_status"] == "failed"
+    assert broken["affiliation_enrich_reasons"] == ["pdf download failed"]
+    assert valid["affiliations"] == ["OpenAI"]
+
+
 def test_run_requeues_full_agent_pipeline_after_reviewer_rejections_until_success(db_session, monkeypatch):
     pipeline = Pipeline(db_session)
     pipeline.crawler.fetch_papers = lambda fetch_date: [
