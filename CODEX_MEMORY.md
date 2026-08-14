@@ -1075,3 +1075,16 @@ When continuing work in this repository, read this file first.
   - a real `2026-08-14` backfill processed 17 selected papers: 15 persisted validated paper-level affiliation lists; 2 had no reliable first-page institution and were left empty. Successful rows completed in one attempt.
 - Working rule for future changes:
   - after every architecture/design decision or code change, update this file with the decision, affected runtime contract, verification performed, and any unresolved operational caveat before closing the task.
+
+## Latest Mainline Merge (2026-08-15, local only; not pushed)
+- `origin/main` was merged into `codex/issue-8-affiliation-enrichment` locally to bring in current UI and pipeline updates.
+- Conflict resolution rules:
+  - retain the issue #8 generic `LLM_*` configuration and DeepSeek implementation; do not restore any legacy provider-specific fields.
+  - retain mainline title-localization batch progress logs, but use `settings.LLM_TITLE_BATCH_SIZE`.
+  - retain mainline detail-page author behavior: display at most the first three names, append the remaining count, and expose all author names in the tooltip.
+  - paper-level `affiliations` remain the preferred source for the institution fact card; author-level affiliations are only a fallback. The institution display is de-duplicated before formatting.
+- Local verification after conflict resolution:
+  - backend: `cd backend && ./venv/bin/pytest ../tests/backend ../tests/smoke` -> `122 passed`.
+  - frontend: `cd frontend && npm run test:run` -> `18 passed`.
+  - frontend: `cd frontend && npm run build` -> passed; existing large-chunk warning remains non-blocking.
+- User instruction: do not push this merge until separately requested.

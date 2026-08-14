@@ -1,9 +1,6 @@
 <template>
   <div class="topics-page">
     <div class="page-header">
-      <button class="secondary-button" type="button" @click="$router.push('/')">
-        {{ lang === 'cn' ? '返回首页' : 'Back to Home' }}
-      </button>
       <div class="header-copy">
         <p class="eyebrow">{{ lang === 'cn' ? '研究方向' : 'Research tracks' }}</p>
         <h1 class="serif-title">{{ lang === 'cn' ? '论文分类' : 'Browse the archive by direction' }}</h1>
@@ -55,6 +52,11 @@ const lang = inject('lang')
 const router = useRouter()
 
 function goToTopic(topicKey) {
+  const targetUrl = router.resolve(`/topic/${topicKey}`).href
+  if (typeof window !== 'undefined' && typeof window.open === 'function') {
+    window.open(targetUrl, '_blank', 'noopener')
+    return
+  }
   router.push(`/topic/${topicKey}`)
 }
 </script>
@@ -67,9 +69,7 @@ function goToTopic(topicKey) {
 }
 
 .page-header {
-  display: flex;
-  align-items: flex-start;
-  gap: 18px;
+  display: block;
 }
 
 .header-copy h1 {
@@ -120,7 +120,7 @@ function goToTopic(topicKey) {
 
 @media (max-width: 768px) {
   .page-header {
-    flex-direction: column;
+    display: block;
   }
 
   .topic-card {

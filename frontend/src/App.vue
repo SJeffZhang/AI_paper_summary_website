@@ -226,6 +226,7 @@ import { Close, Menu, Message } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 
 import { subscribeEmail } from './api/papers'
+import { applyPageTitle } from './utils/pageTitle'
 
 const router = useRouter()
 const route = useRoute()
@@ -273,6 +274,7 @@ function handleLangChange(nextLang) {
   if (typeof window !== 'undefined' && typeof window.localStorage?.setItem === 'function') {
     window.localStorage.setItem('lang', nextLang)
   }
+  applyPageTitle(route, nextLang)
 }
 
 function navigateHome() {
@@ -307,6 +309,7 @@ function handleEscape(event) {
 watch(
   () => route.fullPath,
   () => {
+    applyPageTitle(route, lang.value)
     closeMobileNav()
   },
 )
@@ -320,6 +323,7 @@ watch(mobileNavOpen, async (isOpen) => {
 })
 
 onMounted(() => {
+  applyPageTitle(route, lang.value)
   window.addEventListener('keydown', handleEscape)
 })
 

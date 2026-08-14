@@ -5,6 +5,7 @@ import Unsubscribe from '../views/Unsubscribe.vue'
 import Sources from '../views/Sources.vue'
 import Topic from '../views/Topic.vue'
 import Topics from '../views/Topics.vue'
+import { applyPageTitle } from '../utils/pageTitle'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -40,6 +41,11 @@ const router = createRouter({
       component: Unsubscribe
     }
   ]
+})
+
+router.afterEach((to) => {
+  const lang = typeof window !== 'undefined' ? window.localStorage?.getItem('lang') || 'cn' : 'cn'
+  applyPageTitle(to, lang)
 })
 
 export default router

@@ -15,15 +15,19 @@ vi.mock('../../frontend/src/api/papers', () => ({
 import Home from '../../frontend/src/views/Home.vue'
 
 describe('Home view', () => {
+  let openSpy
+
   beforeEach(() => {
     getPapersMock.mockReset()
     getPapersCalendarMock.mockReset()
     getPapersMock.mockResolvedValue(paperListPayload)
     getPapersCalendarMock.mockResolvedValue(paperCalendarPayload)
+    openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
   })
 
   afterEach(() => {
     vi.clearAllMocks()
+    openSpy.mockRestore()
   })
 
   it('renders grouped focus and watching papers in Chinese mode', async () => {
@@ -94,6 +98,25 @@ describe('Home view', () => {
 
     expect(wrapper.text()).toContain('进入论文分类')
     expect(wrapper.text()).toContain('每页仅展示一天内容')
+  })
+
+  it('opens detail and topic routes in a new tab instead of replacing the current page', async () => {
+    const router = await createTestRouter('/', '/', Home)
+    const wrapper = mount(Home, {
+      global: {
+        provide: { lang: ref('cn') },
+        plugins: [...testPlugins, router]
+      }
+    })
+
+    await flushPromises()
+
+    await wrapper.find('.story-actions .primary-button').trigger('click')
+    await wrapper.find('.hero-actions .primary-button').trigger('click')
+
+    expect(openSpy).toHaveBeenCalledWith('/paper/1', '_blank', 'noopener')
+    expect(openSpy).toHaveBeenCalledWith('/topics', '_blank', 'noopener')
+    expect(router.currentRoute.value.path).toBe('/')
   })
 
   it('renders gray calendar cells for dates without data', async () => {

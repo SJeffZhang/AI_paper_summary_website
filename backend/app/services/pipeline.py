@@ -13,7 +13,6 @@ from app.services.notification_service import send_owner_alert, shanghai_today
 from app.services.scorer import Scorer
 from app.core.config import settings
 from app.core.specs import (
-    DAILY_SNAPSHOT_CAPACITY,
     FOCUS_CAPACITY,
     FOCUS_THRESHOLD,
     WATCHING_CAPACITY,
@@ -70,15 +69,6 @@ class Pipeline:
             )
             if not scored_papers:
                 raise ValueError(f"No papers fetched for {issue_date.isoformat()}.")
-
-            if len(scored_papers) > DAILY_SNAPSHOT_CAPACITY:
-                _safe_progress_log(
-                    (
-                        f"[pipeline] truncating scored snapshot: "
-                        f"total={len(scored_papers)} keep_top={DAILY_SNAPSHOT_CAPACITY}"
-                    )
-                )
-                scored_papers = scored_papers[:DAILY_SNAPSHOT_CAPACITY]
 
             (
                 focus_pool,
@@ -392,6 +382,29 @@ class Pipeline:
         candidate_limit = max(target_count, target_count * multiplier)
         return min(queued_count, configured_cap, candidate_limit)
 
+    @staticmethod
+    def _summarize_progress_detail(detail: Any) -> str:
+        compact = " ".join(str(detail).split())
+        if len(compact) <= 160:
+            return compact
+        return compact[:157] + "..."
+
+    def _log_stage_progress(
+        self,
+        papers: Sequence[Dict[str, Any]],
+        category: str,
+        stage: str,
+        status: str,
+        *,
+        attempt_no: int,
+        detail: Any | None = None,
+    ) -> None:
+        paper_ids = ",".join(str(paper.get("arxiv_id") or "-") for paper in papers) or "-"
+        message = f"[pipeline][{category}][{paper_ids}][{stage}] {status} attempt={attempt_no}"
+        if detail is not None:
+            message += f" detail={self._summarize_progress_detail(detail)}"
+        _safe_progress_log(message)
+
     def _refresh_selected_titles(self, issue_date: date) -> int:
         targeted_summaries = (
             self.db.query(PaperSummary)
@@ -413,7 +426,21 @@ class Pipeline:
             }
             for summary in targeted_summaries
         ]
-        localized_titles = self.ai_processor.localize_titles(title_payload, batch_size=settings.LLM_TITLE_BATCH_SIZE)
+        total_titles = len(title_payload)
+
+        def log_title_refresh_batch(batch_index: int, total_batches: int, batch_size: int) -> None:
+            _safe_progress_log(
+                (
+                    f"[pipeline][title-refresh] issue_date={issue_date.isoformat()} "
+                    f"batch={batch_index}/{total_batches} size={batch_size} total={total_titles}"
+                )
+            )
+
+        localized_titles = self.ai_processor.localize_titles(
+            title_payload,
+            batch_size=settings.LLM_TITLE_BATCH_SIZE,
+            progress_callback=log_title_refresh_batch,
+        )
         updated = 0
         for summary in targeted_summaries:
             paper = summary.paper
@@ -497,6 +524,7 @@ class Pipeline:
             editor_brief = None
             trace_attempt_no = attempt_offset + attempt + 1
             try:
+                self._log_stage_progress(papers, category, "editor", "start", attempt_no=trace_attempt_no)
                 if reviewer_retry_feedback:
                     editor_brief = self.ai_processor.run_editor(
                         papers,
@@ -507,8 +535,17 @@ class Pipeline:
                     editor_brief = self.ai_processor.run_editor(papers, category)
                 editor_records = self.ai_processor.parse_editor_records(editor_brief, papers)
                 self._record_editor_traces(papers, editor_records, attempt_no=trace_attempt_no)
+                self._log_stage_progress(papers, category, "editor", "generated", attempt_no=trace_attempt_no)
                 break
             except StructuredOutputError as exc:
+                self._log_stage_progress(
+                    papers,
+                    category,
+                    "editor",
+                    "invalid",
+                    attempt_no=trace_attempt_no,
+                    detail=exc,
+                )
                 self._record_uniform_stage_traces(
                     papers,
                     stage="editor",
@@ -520,12 +557,21 @@ class Pipeline:
                     editor_brief = self.ai_processor.repair_editor_output(exc.raw_output, papers, category)
                     editor_records = self.ai_processor.parse_editor_records(editor_brief, papers)
                     self._record_editor_traces(papers, editor_records, attempt_no=trace_attempt_no)
+                    self._log_stage_progress(papers, category, "editor", "repaired", attempt_no=trace_attempt_no)
                     break
                 except Exception:
                     pass
                 if attempt >= max_retries:
                     raise
-            except Exception:
+            except Exception as exc:
+                self._log_stage_progress(
+                    papers,
+                    category,
+                    "editor",
+                    "error",
+                    attempt_no=trace_attempt_no,
+                    detail=exc,
+                )
                 if editor_brief:
                     self._record_uniform_stage_traces(
                         papers,
@@ -548,6 +594,7 @@ class Pipeline:
             writer_output = None
             trace_attempt_no = attempt_offset + attempt + 1
             try:
+                self._log_stage_progress(papers, category, "writer", "start", attempt_no=trace_attempt_no)
                 writer_output = self.ai_processor.run_writer(
                     editor_brief=editor_brief,
                     papers_metadata=papers,
@@ -556,7 +603,16 @@ class Pipeline:
                 )
                 writer_records = self.ai_processor.parse_writer_records(writer_output, papers, category)
                 self._record_writer_traces(papers, writer_records, attempt_no=trace_attempt_no)
+                self._log_stage_progress(papers, category, "writer", "generated", attempt_no=trace_attempt_no)
             except StructuredOutputError as exc:
+                self._log_stage_progress(
+                    papers,
+                    category,
+                    "writer",
+                    "invalid",
+                    attempt_no=trace_attempt_no,
+                    detail=exc,
+                )
                 self._record_uniform_stage_traces(
                     papers,
                     stage="writer",
@@ -568,6 +624,7 @@ class Pipeline:
                     writer_output = self.ai_processor.repair_writer_output(exc.raw_output, papers, category)
                     writer_records = self.ai_processor.parse_writer_records(writer_output, papers, category)
                     self._record_writer_traces(papers, writer_records, attempt_no=trace_attempt_no)
+                    self._log_stage_progress(papers, category, "writer", "repaired", attempt_no=trace_attempt_no)
                 except Exception:
                     if attempt >= max_retries:
                         raise
@@ -579,6 +636,14 @@ class Pipeline:
                     )
                     continue
             except Exception as exc:
+                self._log_stage_progress(
+                    papers,
+                    category,
+                    "writer",
+                    "error",
+                    attempt_no=trace_attempt_no,
+                    detail=exc,
+                )
                 if writer_output:
                     self._record_uniform_stage_traces(
                         papers,
@@ -598,6 +663,7 @@ class Pipeline:
                 continue
 
             try:
+                self._log_stage_progress(papers, category, "reviewer", "start", attempt_no=trace_attempt_no)
                 review_result = self.ai_processor.run_reviewer(writer_output)
                 rejected_ids = review_result["rejected_ids"] if review_result["status"] == "REJECTED" else []
                 self._record_reviewer_traces(
@@ -622,8 +688,17 @@ class Pipeline:
                 ]
 
                 if review_result["status"] == "PASSED":
+                    self._log_stage_progress(papers, category, "reviewer", "accepted", attempt_no=trace_attempt_no)
                     return parsed_results, [], review_result["raw_output"]
 
+                self._log_stage_progress(
+                    papers,
+                    category,
+                    "reviewer",
+                    "rejected",
+                    attempt_no=trace_attempt_no,
+                    detail="ids=" + (",".join(rejected_ids) or "-"),
+                )
                 last_rejected_ids = rejected_ids
                 if not settings.PIPELINE_REVIEWER_STRICT:
                     _safe_progress_log(
@@ -661,6 +736,14 @@ class Pipeline:
                     ]
                 )
             except StructuredOutputError as exc:
+                self._log_stage_progress(
+                    papers,
+                    category,
+                    "reviewer",
+                    "invalid",
+                    attempt_no=trace_attempt_no,
+                    detail=exc,
+                )
                 self._record_uniform_stage_traces(
                     papers,
                     stage="reviewer",
@@ -711,8 +794,23 @@ class Pipeline:
                         if record["arxiv_id"] not in set(rejected_ids)
                     ]
                     if review_result["status"] == "PASSED":
+                        self._log_stage_progress(
+                            papers,
+                            category,
+                            "reviewer",
+                            "accepted",
+                            attempt_no=trace_attempt_no,
+                        )
                         return parsed_results, [], review_result["raw_output"]
 
+                    self._log_stage_progress(
+                        papers,
+                        category,
+                        "reviewer",
+                        "rejected",
+                        attempt_no=trace_attempt_no,
+                        detail="ids=" + (",".join(rejected_ids) or "-"),
+                    )
                     last_rejected_ids = rejected_ids
                     if not settings.PIPELINE_REVIEWER_STRICT:
                         _safe_progress_log(
@@ -750,7 +848,15 @@ class Pipeline:
                         ]
                     )
                     continue
-                except Exception:
+                except Exception as repair_exc:
+                    self._log_stage_progress(
+                        papers,
+                        category,
+                        "reviewer",
+                        "error",
+                        attempt_no=trace_attempt_no,
+                        detail=repair_exc,
+                    )
                     if attempt >= max_retries:
                         raise
                     writer_history.append(
@@ -760,6 +866,14 @@ class Pipeline:
                         }
                     )
             except Exception as exc:
+                self._log_stage_progress(
+                    papers,
+                    category,
+                    "reviewer",
+                    "error",
+                    attempt_no=trace_attempt_no,
+                    detail=exc,
+                )
                 if not settings.PIPELINE_REVIEWER_STRICT:
                     _safe_progress_log(
                         (

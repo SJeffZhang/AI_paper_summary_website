@@ -49,4 +49,35 @@ describe('App shell', () => {
     expect(router.currentRoute.value.fullPath).toBe('/topics')
     expect(wrapper.find('.mobile-drawer').exists()).toBe(false)
   })
+
+  it('updates document title for route and language changes', async () => {
+    const HomeStub = { template: '<div>home stub</div>' }
+    const TopicStub = { template: '<div>topics stub</div>' }
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', name: 'home', component: HomeStub },
+        { path: '/topics', name: 'topics', component: TopicStub },
+      ],
+    })
+
+    await router.push('/')
+    await router.isReady()
+
+    const wrapper = mount(App, {
+      global: {
+        plugins: [ElementPlus, router],
+      },
+    })
+
+    expect(document.title).toBe('arXivDaily')
+
+    const langButtons = wrapper.findAll('.lang-option')
+    await langButtons[1].trigger('click')
+    expect(document.title).toBe('arXivDaily')
+
+    await router.push('/topics')
+    await flushPromises()
+    expect(document.title).toBe('Topics')
+  })
 })

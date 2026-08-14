@@ -515,7 +515,7 @@ function goNextMonth() {
 }
 
 function goToDetail(id) {
-  router.push(`/paper/${id}`)
+  openRouteInNewTab(`/paper/${id}`)
 }
 
 function goToSources(issueDate) {
@@ -524,12 +524,21 @@ function goToSources(issueDate) {
 }
 
 function goToTopics() {
-  router.push('/topics')
+  openRouteInNewTab('/topics')
 }
 
 function goToTopic(topicKey) {
   if (!topicKey) return
-  router.push(`/topic/${encodeURIComponent(topicKey)}`)
+  openRouteInNewTab(`/topic/${encodeURIComponent(topicKey)}`)
+}
+
+function openRouteInNewTab(path) {
+  const targetUrl = router.resolve(path).href
+  if (typeof window !== 'undefined' && typeof window.open === 'function') {
+    window.open(targetUrl, '_blank', 'noopener')
+    return
+  }
+  router.push(path)
 }
 
 onMounted(() => {

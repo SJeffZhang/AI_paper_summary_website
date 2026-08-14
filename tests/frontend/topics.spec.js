@@ -13,11 +13,18 @@ import Topics from '../../frontend/src/views/Topics.vue'
 import Topic from '../../frontend/src/views/Topic.vue'
 
 describe('Topics view', () => {
+  let openSpy
+
   beforeEach(() => {
     getPapersMock.mockReset()
+    openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
   })
 
-  it('renders the category catalog and can route to a topic page', async () => {
+  afterEach(() => {
+    openSpy.mockRestore()
+  })
+
+  it('renders the category catalog and opens topic pages in a new tab', async () => {
     const router = createRouter({
       history: createMemoryHistory(),
       routes: [
@@ -42,6 +49,7 @@ describe('Topics view', () => {
     await wrapper.findAll('.topic-card')[0].trigger('click')
     await flushPromises()
 
-    expect(router.currentRoute.value.fullPath).toBe('/topic/Agent')
+    expect(openSpy).toHaveBeenCalledWith('/topic/Agent', '_blank', 'noopener')
+    expect(router.currentRoute.value.fullPath).toBe('/topics')
   })
 })

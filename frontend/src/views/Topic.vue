@@ -1,9 +1,6 @@
 <template>
   <div class="topic-page">
     <div class="page-header">
-      <button class="secondary-button" type="button" @click="$router.push('/topics')">
-        {{ lang === 'cn' ? '返回分类' : 'Back to Categories' }}
-      </button>
       <div>
         <p class="eyebrow">{{ lang === 'cn' ? '技术方向' : 'Topic' }}</p>
         <h1 class="serif-title">
@@ -32,7 +29,7 @@
           <span class="topic-date">{{ paper.issue_date }}</span>
         </div>
         <div class="topic-row-main">
-          <h3 class="serif-title" @click="$router.push(`/paper/${paper.id}`)">
+          <h3 class="serif-title" @click="openPaperInNewTab(paper.id)">
             {{ lang === 'cn' ? paper.title_zh : paper.title_original }}
           </h3>
           <p>{{ lang === 'cn' ? paper.one_line_summary : paper.one_line_summary_en }}</p>
@@ -96,6 +93,15 @@ function handlePageChange(value) {
   router.push({ query: { ...route.query, page: value } })
 }
 
+function openPaperInNewTab(paperId) {
+  const targetUrl = router.resolve(`/paper/${paperId}`).href
+  if (typeof window !== 'undefined' && typeof window.open === 'function') {
+    window.open(targetUrl, '_blank', 'noopener')
+    return
+  }
+  router.push(`/paper/${paperId}`)
+}
+
 watch(() => route.query.page, (newValue) => {
   currentPage.value = Number(newValue) || 1
   fetchTopicPapers()
@@ -112,9 +118,7 @@ onMounted(fetchTopicPapers)
 }
 
 .page-header {
-  display: flex;
-  align-items: flex-start;
-  gap: 18px;
+  display: block;
 }
 
 .page-header h1 {
@@ -191,7 +195,7 @@ onMounted(fetchTopicPapers)
   }
 
   .page-header {
-    flex-direction: column;
+    display: block;
   }
 
   .page-header h1 {
