@@ -413,7 +413,7 @@ class Pipeline:
             }
             for summary in targeted_summaries
         ]
-        localized_titles = self.ai_processor.localize_titles(title_payload, batch_size=settings.KIMI_TITLE_BATCH_SIZE)
+        localized_titles = self.ai_processor.localize_titles(title_payload, batch_size=settings.LLM_TITLE_BATCH_SIZE)
         updated = 0
         for summary in targeted_summaries:
             paper = summary.paper

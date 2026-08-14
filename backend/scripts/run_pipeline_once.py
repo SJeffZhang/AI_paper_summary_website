@@ -36,13 +36,13 @@ def _ensure_prompts_exist() -> None:
 
 def _validate_runtime_config() -> None:
     required_values = {
-        "KIMI_API_KEY": settings.KIMI_API_KEY.strip(),
-        "KIMI_MODEL": settings.KIMI_MODEL.strip(),
-        "KIMI_BASE_URL": settings.KIMI_BASE_URL.strip(),
+        "LLM_API_KEY": settings.LLM_API_KEY,
+        "LLM_MODEL": settings.LLM_MODEL.strip(),
+        "LLM_BASE_URL": settings.LLM_BASE_URL.strip(),
     }
     missing = [key for key, value in required_values.items() if not value]
     if missing:
-        raise RuntimeError("Missing required Kimi runtime settings: " + ", ".join(missing))
+        raise RuntimeError("Missing required LLM runtime settings: " + ", ".join(missing))
 
 
 def _probe_issue_date() -> dict[str, object]:
@@ -144,10 +144,10 @@ def run_pipeline_once() -> dict[str, object]:
     _ensure_prompts_exist()
     print("[run] ensuring database schema is ready", flush=True)
     db_status = ensure_database_ready()
-    print("[run] validating Kimi runtime settings", flush=True)
+    print("[run] validating LLM runtime settings", flush=True)
     _validate_runtime_config()
-    print("[run] checking Kimi connectivity", flush=True)
-    kimi_status = run_checks()
+    print("[run] checking LLM connectivity", flush=True)
+    llm_status = run_checks()
     fixed_issue_date = os.environ.get("PIPELINE_FIXED_ISSUE_DATE", "").strip()
     if fixed_issue_date:
         selected_issue_date = datetime.strptime(fixed_issue_date, "%Y-%m-%d").date()
@@ -163,6 +163,7 @@ def run_pipeline_once() -> dict[str, object]:
     else:
         print("[run] probing eligible issue_date", flush=True)
         probe = _probe_issue_date()
+    selected_issue_date = datetime.strptime(probe["issue_date"], "%Y-%m-%d").date()
     print(
         (
             f"[run] selected issue_date={probe['issue_date']} "
@@ -193,7 +194,7 @@ def run_pipeline_once() -> dict[str, object]:
 
         return {
             "database": db_status,
-            "kimi": kimi_status,
+            "llm": llm_status,
             "selected_issue_date": probe["issue_date"],
             "selected_fetch_date": probe["fetch_date"],
             "fetched_count": task_log.fetched_count,

@@ -1049,3 +1049,29 @@ When continuing work in this repository, read this file first.
 - The local verification path for this issue used:
   - frontend at `127.0.0.1:4173`
   - backend at `127.0.0.1:8000`
+
+## Latest Architecture Update (2026-08-15, DeepSeek migration + issue #8 affiliation enrichment)
+- Active branch: `codex/issue-8-affiliation-enrichment`.
+- Architecture decision:
+  - the application no longer uses provider-specific Kimi or MiniMax runtime fields.
+  - runtime configuration is now `DEEPSEEK_API_KEY` plus generic `LLM_*` fields.
+  - default provider values are `LLM_BASE_URL=https://api.deepseek.com`, `LLM_MODEL=deepseek-v4-flash`, and `LLM_THINKING_ENABLED=false`.
+  - the OpenAI-compatible client remains in use; DeepSeek-specific non-thinking mode is sent through `extra_body.thinking`.
+  - do not commit `backend/.env`; it is ignored and contains the local API credential.
+- Deployment/configuration follow-up:
+  - `backend/.env.example`, `deploy/linux/backend.env.production.template`, README, deploy documentation, runtime scripts, and tests use the generic LLM configuration names.
+  - production deployment must provide `DEEPSEEK_API_KEY` and the required `LLM_*` variables; do not restore legacy Kimi/MiniMax secret names.
+- Full pipeline verification performed locally against the production-synced database:
+  - local MySQL was rebuilt as `8.0.46`, compatible with production MySQL `8.0.45`.
+  - `2026-08-14` was explicitly reset locally and run through the normal crawler -> scorer -> Editor -> Writer -> Reviewer path using DeepSeek.
+  - result: `SUCCESS`, fetched `268`, processed `17`, category split `focus=5`, `watching=12`, `candidate=33`, and `90` AI trace rows.
+  - DeepSeek plain-text and JSON connectivity checks passed.
+  - full regression command `cd backend && ./venv/bin/pytest ../tests/backend ../tests/smoke` passed: `120 passed`.
+- Paper-level affiliation enrichment design:
+  - only selected `focus` and `watching` papers are eligible; the main pipeline remains disabled by default through `AFFILIATION_ENRICH_ENABLED=false`.
+  - download the PDF and extract only its first page locally; do not depend on direct PDF/vision input from the LLM.
+  - one DeepSeek JSON request now returns every candidate with `name`, `is_institution`, and `reason`. Do not reintroduce per-affiliation LLM review calls, which multiply RPM usage.
+  - local validation still requires first-page text evidence, removes duplicates, and rejects paper-title fragments. Validation failures retain feedback and can retry up to `AFFILIATION_ENRICH_MAX_RETRIES` (maximum 5).
+  - a real `2026-08-14` backfill processed 17 selected papers: 15 persisted validated paper-level affiliation lists; 2 had no reliable first-page institution and were left empty. Successful rows completed in one attempt.
+- Working rule for future changes:
+  - after every architecture/design decision or code change, update this file with the decision, affected runtime contract, verification performed, and any unresolved operational caveat before closing the task.

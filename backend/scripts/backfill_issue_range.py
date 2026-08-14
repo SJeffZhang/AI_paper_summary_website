@@ -53,12 +53,12 @@ def _iter_issue_dates(start_date: date, end_date: date):
 def _validate_runtime_config() -> None:
     required_values = {
         "LLM_API_KEY": settings.LLM_API_KEY,
-        "KIMI_MODEL": settings.KIMI_MODEL.strip(),
-        "KIMI_BASE_URL": settings.KIMI_BASE_URL.strip(),
+        "LLM_MODEL": settings.LLM_MODEL.strip(),
+        "LLM_BASE_URL": settings.LLM_BASE_URL.strip(),
     }
     missing = [key for key, value in required_values.items() if not value]
     if missing:
-        raise RuntimeError("Missing required Kimi runtime settings: " + ", ".join(missing))
+        raise RuntimeError("Missing required LLM runtime settings: " + ", ".join(missing))
 
 
 def _summarize_issue_date(issue_date: date) -> tuple[str, int, int, dict[str, int], str | None]:
@@ -88,10 +88,10 @@ def _summarize_issue_date(issue_date: date) -> tuple[str, int, int, dict[str, in
         db.close()
 
 
-def _build_skipped_kimi_status(reason: str) -> dict[str, object]:
+def _build_skipped_llm_status(reason: str) -> dict[str, object]:
     return {
-        "kimi_ready": None,
-        "model": settings.KIMI_MODEL,
+        "llm_ready": None,
+        "model": settings.LLM_MODEL,
         "skipped": True,
         "reason": reason,
     }
@@ -101,7 +101,7 @@ def backfill_issue_range(
     start_date: date,
     end_date: date,
     *,
-    skip_kimi_check: bool = False,
+    skip_llm_check: bool = False,
 ) -> dict[str, object]:
     if end_date < start_date:
         raise ValueError("end_date must be greater than or equal to start_date")
@@ -109,11 +109,11 @@ def backfill_issue_range(
     _ensure_prompts_exist()
     database_status = ensure_database_ready()
     _validate_runtime_config()
-    if skip_kimi_check:
-        print("[range] skip Kimi connectivity precheck by flag", flush=True)
-        kimi_status = _build_skipped_kimi_status("skipped by --skip-kimi-check")
+    if skip_llm_check:
+        print("[range] skip LLM connectivity precheck by flag", flush=True)
+        llm_status = _build_skipped_llm_status("skipped by --skip-llm-check")
     else:
-        kimi_status = run_checks()
+        llm_status = run_checks()
 
     results: list[BackfillResult] = []
     skipped_success = 0
@@ -185,7 +185,7 @@ def backfill_issue_range(
 
     return {
         "database": database_status,
-        "kimi": kimi_status,
+        "llm": llm_status,
         "start_date": start_date.isoformat(),
         "end_date": end_date.isoformat(),
         "skipped_existing_success": skipped_success,
@@ -200,16 +200,16 @@ def main() -> None:
     parser.add_argument("--start-date", default="2026-02-13")
     parser.add_argument("--end-date", default=_default_end_date().isoformat())
     parser.add_argument(
-        "--skip-kimi-check",
+        "--skip-llm-check",
         action="store_true",
-        help="Skip preflight Kimi connectivity checks. Useful when TPD is exhausted but you want to rerun later without changing the command.",
+        help="Skip the preflight LLM connectivity check.",
     )
     args = parser.parse_args()
 
     result = backfill_issue_range(
         start_date=_parse_date(args.start_date),
         end_date=_parse_date(args.end_date),
-        skip_kimi_check=bool(args.skip_kimi_check),
+        skip_llm_check=bool(args.skip_llm_check),
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 

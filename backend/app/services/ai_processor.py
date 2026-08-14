@@ -54,7 +54,7 @@ class AIProcessor:
         max_tokens: Optional[int] = None,
     ) -> str:
         if not self.api_key.strip():
-            raise RuntimeError("KIMI_API_KEY is not configured.")
+            raise RuntimeError("DEEPSEEK_API_KEY is not configured.")
 
         messages = [{"role": "system", "content": system_prompt}]
         if history:
@@ -62,20 +62,24 @@ class AIProcessor:
         messages.append({"role": "user", "content": user_content})
 
         request_timeout = (
-            settings.KIMI_LONGFORM_TIMEOUT_SECONDS if longform else settings.KIMI_TIMEOUT_SECONDS
+            settings.LLM_LONGFORM_TIMEOUT_SECONDS if longform else settings.LLM_TIMEOUT_SECONDS
         )
         client = self._get_client(request_timeout)
         payload: Dict[str, Any] = {
-            "model": settings.KIMI_MODEL,
+            "model": settings.LLM_MODEL,
             "messages": messages,
         }
-        normalized_temperature = self._normalize_temperature_for_model(settings.KIMI_MODEL, temperature)
+        normalized_temperature = self._normalize_temperature_for_model(settings.LLM_MODEL, temperature)
         if normalized_temperature is not None:
             payload["temperature"] = normalized_temperature
         if response_format is not None:
             payload["response_format"] = response_format
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
+        if settings.LLM_MODEL.startswith("deepseek-"):
+            payload["extra_body"] = {
+                "thinking": {"type": "enabled" if settings.LLM_THINKING_ENABLED else "disabled"}
+            }
 
         max_attempts = self._max_retry_attempts(longform)
         last_error: Optional[Exception] = None
@@ -88,39 +92,39 @@ class AIProcessor:
                     completion = client.chat.completions.create(**payload)
                     content = self._extract_message_content(completion.choices[0].message)
                 if not content:
-                    last_error = ValueError("Kimi returned empty content.")
+                    last_error = ValueError("LLM returned empty content.")
                     if attempt >= max_attempts - 1:
-                        raise RuntimeError("Kimi returned empty content after retries.") from last_error
+                        raise RuntimeError("LLM returned empty content after retries.") from last_error
                     time.sleep(self._retry_backoff_seconds(attempt, longform, reason="empty"))
                     continue
                 return content
             except (AuthenticationError, PermissionDeniedError) as exc:
-                raise RuntimeError("Kimi authentication failed. Check KIMI_API_KEY permissions and validity.") from exc
+                raise RuntimeError("LLM authentication failed. Check DEEPSEEK_API_KEY permissions and validity.") from exc
             except RateLimitError as exc:
                 last_error = exc
                 if attempt >= max_attempts - 1:
-                    raise RuntimeError("Kimi rate limit exceeded after retries.") from exc
+                    raise RuntimeError("LLM rate limit exceeded after retries.") from exc
                 time.sleep(self._retry_backoff_seconds(attempt, longform, reason="rate_limit"))
             except (APIConnectionError, APITimeoutError) as exc:
                 last_error = exc
                 if attempt >= max_attempts - 1:
                     timeout_label = "longform" if longform else "standard"
-                    raise RuntimeError(f"Kimi {timeout_label} request timed out after retries.") from exc
+                    raise RuntimeError(f"LLM {timeout_label} request timed out after retries.") from exc
                 time.sleep(self._retry_backoff_seconds(attempt, longform, reason="timeout"))
             except APIError as exc:
                 last_error = exc
                 if attempt >= max_attempts - 1:
-                    raise RuntimeError(f"Kimi request failed after retries: {exc}") from exc
+                    raise RuntimeError(f"LLM request failed after retries: {exc}") from exc
                 time.sleep(self._retry_backoff_seconds(attempt, longform, reason="api_error"))
 
-        raise RuntimeError("Kimi request failed without a recoverable response.") from last_error
+        raise RuntimeError("LLM request failed without a recoverable response.") from last_error
 
     def _get_client(self, timeout_seconds: int) -> OpenAI:
         client = self._clients.get(timeout_seconds)
         if client is None:
             client = OpenAI(
                 api_key=self.api_key,
-                base_url=settings.KIMI_BASE_URL,
+                base_url=settings.LLM_BASE_URL,
                 timeout=timeout_seconds,
                 max_retries=0,
             )
@@ -129,8 +133,7 @@ class AIProcessor:
 
     @staticmethod
     def _should_stream(longform: bool, response_format: Optional[Dict[str, str]]) -> bool:
-        # Kimi longform streaming can hang in production network conditions.
-        # Keep non-streaming as the default stable path.
+        # Keep non-streaming as the default stable path for structured responses.
         return False
 
     @staticmethod
@@ -154,25 +157,21 @@ class AIProcessor:
     @staticmethod
     def _minimum_request_interval_seconds(longform: bool) -> float:
         if longform:
-            configured = settings.KIMI_LONGFORM_MIN_REQUEST_INTERVAL_SECONDS
+            configured = settings.LLM_LONGFORM_MIN_REQUEST_INTERVAL_SECONDS
         else:
-            configured = settings.KIMI_MIN_REQUEST_INTERVAL_SECONDS
+            configured = settings.LLM_MIN_REQUEST_INTERVAL_SECONDS
         return max(0.0, float(configured))
 
     @staticmethod
     def _normalize_temperature_for_model(model_name: str, temperature: Optional[float]) -> Optional[float]:
-        if temperature is None:
-            return None
-        if str(model_name or "").strip().lower() == "kimi-k2.5":
-            return 1.0
         return temperature
 
     @staticmethod
     def _max_retry_attempts(longform: bool) -> int:
-        configured = max(1, int(settings.KIMI_MAX_RETRIES or 1))
+        configured = max(1, int(settings.LLM_MAX_RETRIES or 1))
         if not longform:
             return configured
-        configured_longform = max(1, int(settings.KIMI_LONGFORM_MAX_RETRIES or configured))
+        configured_longform = max(1, int(settings.LLM_LONGFORM_MAX_RETRIES or configured))
         return min(configured, configured_longform)
 
     def run_editor(
@@ -210,7 +209,7 @@ class AIProcessor:
             self.editor_prompt,
             "\n".join(input_text),
             longform=True,
-            max_tokens=max(settings.KIMI_EDITOR_MAX_TOKENS, 1200 * len(locked_papers)),
+            max_tokens=max(settings.LLM_EDITOR_MAX_TOKENS, 1200 * len(locked_papers)),
         )
         try:
             self.parse_editor_records(output, locked_papers)
@@ -252,8 +251,8 @@ class AIProcessor:
         if not pending:
             return localized_titles
 
-        effective_batch_size = max(1, int(batch_size or settings.KIMI_TITLE_BATCH_SIZE or 1))
-        max_localize_attempts = max(1, int(settings.KIMI_TITLE_LOCALIZATION_ATTEMPTS or 1))
+        effective_batch_size = max(1, int(batch_size or settings.LLM_TITLE_BATCH_SIZE or 1))
+        max_localize_attempts = max(1, int(settings.LLM_TITLE_LOCALIZATION_ATTEMPTS or 1))
         for start in range(0, len(pending), effective_batch_size):
             batch = list(pending[start:start + effective_batch_size])
             prompt_lines = [
@@ -335,9 +334,9 @@ class AIProcessor:
             longform=True,
             max_tokens=max(
                 (
-                    settings.KIMI_WRITER_FOCUS_MAX_TOKENS
+                    settings.LLM_WRITER_FOCUS_MAX_TOKENS
                     if category == "focus"
-                    else settings.KIMI_WRITER_WATCHING_MAX_TOKENS
+                    else settings.LLM_WRITER_WATCHING_MAX_TOKENS
                 ),
                 (1800 if category == "focus" else 1200) * len(selected_ids),
             ),
@@ -353,7 +352,7 @@ class AIProcessor:
             self.reviewer_prompt,
             writer_output,
             longform=True,
-            max_tokens=max(256, settings.KIMI_REVIEWER_MAX_TOKENS),
+            max_tokens=max(256, settings.LLM_REVIEWER_MAX_TOKENS),
         ).strip()
         try:
             return self._parse_reviewer_result(output, writer_output)
@@ -676,7 +675,7 @@ class AIProcessor:
             if normalized:
                 return normalized
 
-        # Moonshot/Kimi may occasionally return empty `content` while placing
+        # Some OpenAI-compatible providers may place content in alternative fields.
         # the effective text payload in `reasoning_content`.
         reasoning_content = getattr(message, "reasoning_content", None)
         if isinstance(reasoning_content, str):
@@ -700,7 +699,7 @@ class AIProcessor:
         normalized = str(text or "").strip()
         if not normalized:
             return ""
-        # MiniMax models may prepend internal reasoning blocks.
+        # Providers may prepend internal reasoning blocks.
         normalized = re.sub(r"<think>[\s\S]*?</think>\s*", "", normalized, flags=re.IGNORECASE)
         return normalized.strip()
 
@@ -751,7 +750,7 @@ class AIProcessor:
     @staticmethod
     def _truncate_abstract(abstract: str, limit: Optional[int] = None) -> str:
         if limit is None:
-            limit = int(settings.KIMI_ABSTRACT_MAX_CHARS or 0)
+            limit = int(settings.LLM_ABSTRACT_MAX_CHARS or 0)
         normalized = " ".join(str(abstract or "").split())
         if limit <= 0:
             return normalized

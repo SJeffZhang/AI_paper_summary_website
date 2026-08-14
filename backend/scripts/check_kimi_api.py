@@ -50,45 +50,45 @@ def _extract_json_object(raw_text: str) -> dict:
 def _build_client() -> OpenAI:
     api_key = settings.LLM_API_KEY
     if not api_key:
-        raise RuntimeError("No LLM API key configured. Set MINIMAX_API_KEY (or legacy KIMI_API_KEY).")
+        raise RuntimeError("No LLM API key configured. Set DEEPSEEK_API_KEY.")
 
     return OpenAI(
         api_key=api_key,
-        base_url=settings.KIMI_BASE_URL,
-        timeout=settings.KIMI_TIMEOUT_SECONDS,
+        base_url=settings.LLM_BASE_URL,
+        timeout=settings.LLM_TIMEOUT_SECONDS,
         max_retries=0,
     )
 
 
 def _create_completion(client: OpenAI, **kwargs):
-    max_retries = max(1, int(settings.KIMI_MAX_RETRIES or 1))
+    max_retries = max(1, int(settings.LLM_MAX_RETRIES or 1))
     last_error = None
     for attempt in range(max_retries):
         try:
             return client.chat.completions.create(**kwargs)
         except (AuthenticationError, PermissionDeniedError) as exc:
-            raise RuntimeError("Kimi authentication failed. Check KIMI_API_KEY permissions and validity.") from exc
+            raise RuntimeError("LLM authentication failed. Check DEEPSEEK_API_KEY permissions and validity.") from exc
         except RateLimitError as exc:
             last_error = exc
             if attempt >= max_retries - 1:
-                raise RuntimeError("Kimi rate limit exceeded during connectivity checks.") from exc
+                raise RuntimeError("LLM rate limit exceeded during connectivity checks.") from exc
             wait_seconds = min(15 * (attempt + 1), 60)
-            print(f"[check_kimi] rate limited, retrying in {wait_seconds}s", flush=True)
+            print(f"[check_llm] rate limited, retrying in {wait_seconds}s", flush=True)
             time.sleep(wait_seconds)
         except (APIConnectionError, APITimeoutError) as exc:
             last_error = exc
             if attempt >= max_retries - 1:
-                raise RuntimeError("Kimi connectivity check timed out after retries.") from exc
-            print(f"[check_kimi] connection timed out on attempt {attempt + 1}, retrying", flush=True)
+                raise RuntimeError("LLM connectivity check timed out after retries.") from exc
+            print(f"[check_llm] connection timed out on attempt {attempt + 1}, retrying", flush=True)
             time.sleep(min(2 ** attempt, 4))
         except APIError as exc:
             last_error = exc
             if attempt >= max_retries - 1:
-                raise RuntimeError(f"Kimi connectivity check failed after retries: {exc}") from exc
-            print(f"[check_kimi] API error on attempt {attempt + 1}, retrying", flush=True)
+                raise RuntimeError(f"LLM connectivity check failed after retries: {exc}") from exc
+            print(f"[check_llm] API error on attempt {attempt + 1}, retrying", flush=True)
             time.sleep(min(2 ** attempt, 4))
 
-    raise RuntimeError("Kimi connectivity check failed without a recoverable response.") from last_error
+    raise RuntimeError("LLM connectivity check failed without a recoverable response.") from last_error
 
 
 def run_checks() -> dict[str, object]:
@@ -96,7 +96,7 @@ def run_checks() -> dict[str, object]:
 
     chat_completion = _create_completion(
         client,
-        model=settings.KIMI_MODEL,
+        model=settings.LLM_MODEL,
         messages=[
             {"role": "system", "content": "You are a concise assistant."},
             {"role": "user", "content": "Reply with exactly: pong"},
@@ -104,11 +104,11 @@ def run_checks() -> dict[str, object]:
     )
     chat_content = (chat_completion.choices[0].message.content or "").strip()
     if not chat_content:
-        raise RuntimeError("Kimi plain-text check returned empty content.")
+        raise RuntimeError("LLM plain-text check returned empty content.")
 
     json_completion = _create_completion(
         client,
-        model=settings.KIMI_MODEL,
+        model=settings.LLM_MODEL,
         messages=[
             {
                 "role": "system",
@@ -125,8 +125,8 @@ def run_checks() -> dict[str, object]:
     parsed_json = _extract_json_object(json_content)
 
     return {
-        "kimi_ready": True,
-        "model": settings.KIMI_MODEL,
+        "llm_ready": True,
+        "model": settings.LLM_MODEL,
         "plain_text_sample": chat_content,
         "json_mode_sample": parsed_json,
     }

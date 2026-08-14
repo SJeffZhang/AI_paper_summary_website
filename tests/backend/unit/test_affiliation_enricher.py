@@ -13,7 +13,7 @@ class FakeAIProcessor:
     def _call_llm(self, **kwargs):
         self.calls.append(kwargs)
         if not self.outputs:
-            raise AssertionError("unexpected MiniMax call")
+            raise AssertionError("unexpected LLM call")
         output = self.outputs.pop(0)
         if isinstance(output, Exception):
             raise output
@@ -49,14 +49,17 @@ def _enricher(fake_ai):
     )
 
 
+def _reviewed_affiliations(*items):
+    return json.dumps({"affiliations": list(items)})
+
+
 def test_enrich_paper_writes_paper_level_affiliations(monkeypatch):
     monkeypatch.setattr("app.services.affiliation_enricher.settings.AFFILIATION_ENRICH_PAGE_TEXT_MIN_CHARS", 20)
     fake_ai = FakeAIProcessor(
-        [
-            "OpenAI\nStanford University\nOpenAI",
-            "YES",
-            "Yes, institution.",
-        ]
+        [_reviewed_affiliations(
+            {"name": "OpenAI", "is_institution": True, "reason": ""},
+            {"name": "Stanford University", "is_institution": True, "reason": ""},
+        )]
     )
 
     result = _enricher(fake_ai).enrich_paper(_paper())
@@ -65,10 +68,9 @@ def test_enrich_paper_writes_paper_level_affiliations(monkeypatch):
     assert result.attempts == 1
     assert result.affiliation_count == 2
     assert result.affiliations == ["OpenAI", "Stanford University"]
-    assert "one per line" in fake_ai.calls[0]["user_content"]
-    assert "response_format" not in fake_ai.calls[0]
-    assert fake_ai.calls[1]["user_content"] == "Value: OpenAI"
-    assert fake_ai.calls[2]["user_content"] == "Value: Stanford University"
+    assert "JSON output contract" in fake_ai.calls[0]["user_content"]
+    assert fake_ai.calls[0]["response_format"] == {"type": "json_object"}
+    assert len(fake_ai.calls) == 1
 
 
 def test_enrich_paper_accepts_json_organization_list(monkeypatch):
@@ -77,18 +79,12 @@ def test_enrich_paper_accepts_json_organization_list(monkeypatch):
         [
             json.dumps(
                 {
-                    "organizations": [
-                        {"name": "OpenAI"},
-                        {"name": "Stanford University"},
+                    "affiliations": [
+                        {"name": "OpenAI", "is_institution": True, "reason": ""},
+                        {"name": "Stanford University", "is_institution": True, "reason": ""},
                     ]
                 }
-            ),
-            json.dumps(
-                {
-                    "verdict": "approved",
-                }
-            ),
-            json.dumps({"approved": True}),
+            )
         ]
     )
 
@@ -103,12 +99,14 @@ def test_enrich_paper_retries_with_validator_feedback(monkeypatch):
     monkeypatch.setattr("app.services.affiliation_enricher.settings.AFFILIATION_ENRICH_MAX_RETRIES", 2)
     fake_ai = FakeAIProcessor(
         [
-            "OpenAI\nalice@example.com",
-            "YES",
-            "NO - email, not institution",
-            "OpenAI\nStanford University",
-            "YES",
-            "YES",
+            _reviewed_affiliations(
+                {"name": "OpenAI", "is_institution": True, "reason": ""},
+                {"name": "alice@example.com", "is_institution": False, "reason": "email"},
+            ),
+            _reviewed_affiliations(
+                {"name": "OpenAI", "is_institution": True, "reason": ""},
+                {"name": "Stanford University", "is_institution": True, "reason": ""},
+            ),
         ]
     )
 
@@ -117,7 +115,7 @@ def test_enrich_paper_retries_with_validator_feedback(monkeypatch):
     assert result.status == "overwrite_applied"
     assert result.attempts == 2
     assert result.affiliations == ["OpenAI", "Stanford University"]
-    second_prompt = fake_ai.calls[3]["user_content"]
+    second_prompt = fake_ai.calls[1]["user_content"]
     assert "Rejected candidate lines:" in second_prompt
     assert "alice@example.com" in second_prompt
 
@@ -127,12 +125,14 @@ def test_enrich_paper_stops_after_configured_attempts(monkeypatch):
     monkeypatch.setattr("app.services.affiliation_enricher.settings.AFFILIATION_ENRICH_MAX_RETRIES", 2)
     fake_ai = FakeAIProcessor(
         [
-            "OpenAI\nalice@example.com",
-            "YES",
-            "NO | email, not institution",
-            "OpenAI\nalice@example.com",
-            "YES",
-            "NO | email, not institution",
+            _reviewed_affiliations(
+                {"name": "OpenAI", "is_institution": True, "reason": ""},
+                {"name": "alice@example.com", "is_institution": False, "reason": "email"},
+            ),
+            _reviewed_affiliations(
+                {"name": "OpenAI", "is_institution": True, "reason": ""},
+                {"name": "alice@example.com", "is_institution": False, "reason": "email"},
+            ),
         ]
     )
 
@@ -141,13 +141,13 @@ def test_enrich_paper_stops_after_configured_attempts(monkeypatch):
     assert result.status == "skipped_not_institution"
     assert result.attempts == 2
     assert result.affiliations == []
-    assert len(fake_ai.calls) == 6
+    assert len(fake_ai.calls) == 2
 
 
 def test_enrich_paper_reports_empty_extraction_as_low_confidence(monkeypatch):
     monkeypatch.setattr("app.services.affiliation_enricher.settings.AFFILIATION_ENRICH_PAGE_TEXT_MIN_CHARS", 20)
     monkeypatch.setattr("app.services.affiliation_enricher.settings.AFFILIATION_ENRICH_MAX_RETRIES", 1)
-    fake_ai = FakeAIProcessor(["EMPTY"])
+    fake_ai = FakeAIProcessor([_reviewed_affiliations()])
 
     result = _enricher(fake_ai).enrich_paper(_paper())
 
@@ -158,7 +158,10 @@ def test_enrich_paper_reports_empty_extraction_as_low_confidence(monkeypatch):
 def test_enrich_paper_rejects_missing_text_evidence(monkeypatch):
     monkeypatch.setattr("app.services.affiliation_enricher.settings.AFFILIATION_ENRICH_PAGE_TEXT_MIN_CHARS", 20)
     monkeypatch.setattr("app.services.affiliation_enricher.settings.AFFILIATION_ENRICH_MAX_RETRIES", 1)
-    fake_ai = FakeAIProcessor(["OpenAI\nGoogle DeepMind"])
+    fake_ai = FakeAIProcessor([_reviewed_affiliations(
+        {"name": "OpenAI", "is_institution": True, "reason": ""},
+        {"name": "Google DeepMind", "is_institution": True, "reason": ""},
+    )])
 
     result = _enricher(fake_ai).enrich_paper(_paper())
 
@@ -169,12 +172,9 @@ def test_enrich_paper_rejects_missing_text_evidence(monkeypatch):
 
 def test_enrich_paper_does_not_require_author_records(monkeypatch):
     monkeypatch.setattr("app.services.affiliation_enricher.settings.AFFILIATION_ENRICH_PAGE_TEXT_MIN_CHARS", 20)
-    fake_ai = FakeAIProcessor(
-        [
-            "Mila",
-            "YES",
-        ]
-    )
+    fake_ai = FakeAIProcessor([_reviewed_affiliations(
+        {"name": "Mila", "is_institution": True, "reason": ""},
+    )])
     paper = {**_paper(), "authors": []}
 
     result = _enricher(fake_ai).enrich_paper(paper)
@@ -201,32 +201,20 @@ def test_enrich_paper_reports_short_first_page_text(monkeypatch):
 def test_enrich_paper_reports_invalid_review_structure(monkeypatch):
     monkeypatch.setattr("app.services.affiliation_enricher.settings.AFFILIATION_ENRICH_PAGE_TEXT_MIN_CHARS", 20)
     monkeypatch.setattr("app.services.affiliation_enricher.settings.AFFILIATION_ENRICH_MAX_RETRIES", 1)
-    fake_ai = FakeAIProcessor(
-        [
-            "OpenAI\nStanford University",
-            "maybe",
-        ]
-    )
+    fake_ai = FakeAIProcessor([json.dumps({"organizations": [{"name": "OpenAI"}]})])
 
     result = _enricher(fake_ai).enrich_paper(_paper())
 
     assert result.status == "skipped_structure_invalid"
-    assert "review_invalid_verdict" in result.reasons[0]
+    assert "affiliation_output_must_contain" in result.reasons[0]
 
 
-def test_enrich_paper_salvages_affiliations_from_reasoning_text(monkeypatch):
+def test_enrich_paper_accepts_reviewed_json_affiliations(monkeypatch):
     monkeypatch.setattr("app.services.affiliation_enricher.settings.AFFILIATION_ENRICH_PAGE_TEXT_MIN_CHARS", 20)
-    fake_ai = FakeAIProcessor(
-        [
-            (
-                'Looking at the text:\n'
-                '"OpenAI" - clearly an institution\n'
-                '"Stanford University" - clearly an institution\n'
-            ),
-            "YES",
-            "YES",
-        ]
-    )
+    fake_ai = FakeAIProcessor([_reviewed_affiliations(
+        {"name": "OpenAI", "is_institution": True, "reason": ""},
+        {"name": "Stanford University", "is_institution": True, "reason": ""},
+    )])
 
     result = _enricher(fake_ai).enrich_paper(_paper())
 
@@ -237,7 +225,10 @@ def test_enrich_paper_salvages_affiliations_from_reasoning_text(monkeypatch):
 def test_enrich_paper_rejects_title_fragment_candidates(monkeypatch):
     monkeypatch.setattr("app.services.affiliation_enricher.settings.AFFILIATION_ENRICH_PAGE_TEXT_MIN_CHARS", 20)
     monkeypatch.setattr("app.services.affiliation_enricher.settings.AFFILIATION_ENRICH_MAX_RETRIES", 1)
-    fake_ai = FakeAIProcessor(["SpatialEvo\nStepFun"])
+    fake_ai = FakeAIProcessor([_reviewed_affiliations(
+        {"name": "SpatialEvo", "is_institution": True, "reason": ""},
+        {"name": "StepFun", "is_institution": True, "reason": ""},
+    )])
     paper = {
         **_paper(),
         "title_original": "SpatialEvo: Self-Evolving Spatial Intelligence via Deterministic Geometric Environments",
@@ -263,14 +254,12 @@ def test_strip_title_from_front_matter_removes_exact_title_and_prefix():
     assert stripped == "Alice 1 ZhejiangUniversity 2 StepFun"
 
 
-def test_enrich_paper_prefers_deterministic_numbered_affiliation_block(monkeypatch):
+def test_enrich_paper_handles_numbered_affiliation_block_in_one_request(monkeypatch):
     monkeypatch.setattr("app.services.affiliation_enricher.settings.AFFILIATION_ENRICH_PAGE_TEXT_MIN_CHARS", 20)
-    fake_ai = FakeAIProcessor(
-        [
-            "YES",
-            "YES",
-        ]
-    )
+    fake_ai = FakeAIProcessor([_reviewed_affiliations(
+        {"name": "ZhejiangUniversity", "is_institution": True, "reason": ""},
+        {"name": "StepFun", "is_institution": True, "reason": ""},
+    )])
     page_text = (
         "SpatialEvo: Self-Evolving Spatial Intelligence via Deterministic Geometric Environments "
         "DingmingLi1,YingxiuZhao2 1 ZhejiangUniversity 2 StepFun GitHub HuggingFace Abstract"
@@ -291,18 +280,22 @@ def test_enrich_paper_prefers_deterministic_numbered_affiliation_block(monkeypat
 
     assert result.status == "overwrite_applied"
     assert result.affiliations == ["ZhejiangUniversity", "StepFun"]
-    assert len(fake_ai.calls) == 2
-    assert all("Value:" in call["user_content"] for call in fake_ai.calls)
+    assert len(fake_ai.calls) == 1
+    assert fake_ai.calls[0]["response_format"] == {"type": "json_object"}
 
 
-def test_enrich_paper_reuses_deterministic_affiliations_after_review_protocol_failure(monkeypatch):
+def test_enrich_paper_retries_after_review_rejection(monkeypatch):
     monkeypatch.setattr("app.services.affiliation_enricher.settings.AFFILIATION_ENRICH_PAGE_TEXT_MIN_CHARS", 20)
     monkeypatch.setattr("app.services.affiliation_enricher.settings.AFFILIATION_ENRICH_MAX_RETRIES", 3)
     fake_ai = FakeAIProcessor(
         [
-            "The user wants me to classify an affiliation value.",
-            "YES",
-            "YES",
+            _reviewed_affiliations(
+                {"name": "ZhejiangUniversity", "is_institution": False, "reason": "invalid label"},
+            ),
+            _reviewed_affiliations(
+                {"name": "ZhejiangUniversity", "is_institution": True, "reason": ""},
+                {"name": "StepFun", "is_institution": True, "reason": ""},
+            ),
         ]
     )
     page_text = (
@@ -326,8 +319,8 @@ def test_enrich_paper_reuses_deterministic_affiliations_after_review_protocol_fa
     assert result.status == "overwrite_applied"
     assert result.attempts == 2
     assert result.affiliations == ["ZhejiangUniversity", "StepFun"]
-    assert len(fake_ai.calls) == 3
-    assert all(call["user_content"].startswith("Value:") for call in fake_ai.calls)
+    assert len(fake_ai.calls) == 2
+    assert all(call["response_format"] == {"type": "json_object"} for call in fake_ai.calls)
 
 
 def test_parse_single_review_output_rejects_prompt_echo_without_verdict():

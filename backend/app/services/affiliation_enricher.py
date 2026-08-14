@@ -98,8 +98,6 @@ class AffiliationEnricher:
             extraction_text,
             str(paper.get("title_original") or ""),
         )
-        deterministic_affiliations = self._extract_numbered_affiliations(extraction_text)
-
         max_attempts = min(5, max(1, int(settings.AFFILIATION_ENRICH_MAX_RETRIES or 1)))
         previous_output = ""
         retry_feedback = ""
@@ -115,27 +113,14 @@ class AffiliationEnricher:
                 },
             )
             try:
-                if deterministic_affiliations:
-                    affiliations = list(deterministic_affiliations)
-                    previous_output = "\n".join(affiliations)
-                    self._emit_progress(
-                        "attempt_deterministic_parsed" if attempt == 1 else "attempt_deterministic_reused",
-                        {
-                            "arxiv_id": paper.get("arxiv_id", ""),
-                            "attempt": attempt,
-                            "max_attempts": max_attempts,
-                            "affiliation_count": len(affiliations),
-                        },
-                    )
-                else:
-                    raw_output = self._extract_affiliations(
-                        paper=paper,
-                        page_text=extraction_text,
-                        retry_feedback=retry_feedback,
-                        previous_output=previous_output,
-                    )
-                    previous_output = raw_output
-                    affiliations = self._parse_affiliations(raw_output, extraction_text)
+                raw_output = self._extract_affiliations(
+                    paper=paper,
+                    page_text=extraction_text,
+                    retry_feedback=retry_feedback,
+                    previous_output=previous_output,
+                )
+                previous_output = raw_output
+                affiliations, review_reasons = self._parse_affiliation_review_output(raw_output)
             except Exception as exc:
                 reasons = [f"extract_invalid: {exc}"]
                 last_validation = AffiliationValidation(affiliations=[], rejected_reasons=reasons)
@@ -156,6 +141,7 @@ class AffiliationEnricher:
                 page_text,
                 title_original=str(paper.get("title_original") or ""),
             )
+            validation.rejected_reasons.extend(review_reasons)
             last_validation = validation
             self._emit_progress(
                 "attempt_validated",
@@ -171,41 +157,25 @@ class AffiliationEnricher:
                 retry_feedback = self._build_retry_feedback(validation.rejected_reasons, previous_output)
                 continue
 
-            try:
-                review_validation = self._review_affiliations(validation.affiliations)
-            except Exception as exc:
-                reasons = [f"extract_invalid: {exc}"]
-                last_validation = AffiliationValidation(affiliations=[], rejected_reasons=reasons)
-                self._emit_progress(
-                    "attempt_review_invalid",
-                    {
-                        "arxiv_id": paper.get("arxiv_id", ""),
-                        "attempt": attempt,
-                        "max_attempts": max_attempts,
-                        "reasons": reasons,
-                    },
-                )
-                retry_feedback = self._build_retry_feedback(reasons, previous_output)
-                continue
-            last_validation = review_validation
+            last_validation = validation
             self._emit_progress(
                 "attempt_reviewed",
                 {
                     "arxiv_id": paper.get("arxiv_id", ""),
                     "attempt": attempt,
                     "max_attempts": max_attempts,
-                    "affiliation_count": len(review_validation.affiliations),
-                    "reasons": review_validation.rejected_reasons,
+                    "affiliation_count": len(validation.affiliations),
+                    "reasons": validation.rejected_reasons,
                 },
             )
-            if review_validation.approved:
+            if validation.approved:
                 return AffiliationEnrichmentResult(
                     status="overwrite_applied",
-                    affiliations=review_validation.affiliations,
+                    affiliations=validation.affiliations,
                     attempts=attempt,
                 )
 
-            retry_feedback = self._build_retry_feedback(review_validation.rejected_reasons, previous_output)
+            retry_feedback = self._build_retry_feedback(validation.rejected_reasons, previous_output)
 
         return AffiliationEnrichmentResult(
             status=self._status_from_reasons(last_validation.rejected_reasons),
@@ -230,32 +200,15 @@ class AffiliationEnricher:
                 f"arxiv_id: {paper.get('arxiv_id', '')}",
                 f"title: {paper.get('title_original', '')}",
                 "",
-                "# Hard output contract",
-                "Return ONLY raw institution names, one per line.",
-                "Each non-empty line will be parsed as one affiliation candidate.",
-                "Each line must be an exact institution or organization span copied from the source text.",
-                "Do not paraphrase, normalize, or explain.",
-                "Do not output any prefixes, bullets, numbering, quotes, markdown, or commentary.",
-                (
-                    "Do not output lines like: Let me analyze, Looking at the text, The affiliations are, "
-                    "According to the instructions, So I should output."
-                ),
-                (
-                    "Do not return author names, email addresses, URLs, footnote markers, addresses alone, "
-                    "funding bodies, grants, paper titles, headings, platforms without affiliation support, "
-                    "or explanations."
-                ),
-                "Do not output method names, system names, dataset names, or paper-title fragments.",
-                "Preserve names exactly as they appear when possible.",
-                "Return EMPTY if there is no organization or institution name.",
-                "",
-                "# Good example",
-                "Source: 1 ZhejiangUniversity 2 StepFun GitHub HuggingFace",
-                "Valid output:",
-                "ZhejiangUniversity",
-                "StepFun",
-                "Invalid output:",
-                "The affiliations are ZhejiangUniversity and StepFun",
+                "# JSON output contract",
+                "Return a JSON object with exactly one field: affiliations.",
+                "affiliations must be an array of objects with name, is_institution, and reason fields.",
+                "name must be an exact organization span copied from the source text.",
+                "is_institution must be true only for a real university, company, research institute, hospital, or lab.",
+                "Use false for author names, emails, URLs, footnote labels, addresses, funding bodies, paper titles, methods, datasets, and headings.",
+                "reason must be a short explanation; use an empty string when is_institution is true.",
+                "Never infer organizations not present in the source text.",
+                "If no organization is present, return {\"affiliations\": []}.",
                 "",
                 "# Source text",
                 "BEGIN_SOURCE",
@@ -269,15 +222,39 @@ class AffiliationEnricher:
 
         return self.ai_processor._call_llm(
             system_prompt=(
-                "You are a high-precision affiliation extractor. "
-                "You are not a chat assistant. "
-                "Output only the final raw affiliation lines. "
-                "Never explain your reasoning."
+                "You are a high-precision paper affiliation extractor and reviewer. "
+                "Return only valid JSON and follow the requested schema exactly."
             ),
             user_content=user_content,
+            response_format={"type": "json_object"},
             temperature=0.0,
-            max_tokens=180,
+            max_tokens=600,
         )
+
+    def _parse_affiliation_review_output(self, raw_output: str) -> tuple[List[str], List[str]]:
+        parsed = self._try_parse_json_any(raw_output)
+        if not isinstance(parsed, dict) or not isinstance(parsed.get("affiliations"), list):
+            raise ValueError("affiliation_output_must_contain_an_affiliations_array")
+
+        affiliations: List[str] = []
+        rejected_reasons: List[str] = []
+        for item in parsed["affiliations"]:
+            if not isinstance(item, dict):
+                rejected_reasons.append("review_invalid_item: affiliation item must be an object")
+                continue
+            name = self._normalize_affiliation(item.get("name"))
+            verdict = item.get("is_institution")
+            reason = str(item.get("reason") or "not an institution").strip()
+            if not name:
+                rejected_reasons.append("review_invalid_item: missing affiliation name")
+                continue
+            if verdict is True:
+                affiliations.append(name)
+            elif verdict is False:
+                rejected_reasons.append(f"review_rejected: affiliation={name!r} reason={reason}")
+            else:
+                rejected_reasons.append(f"review_invalid_item: affiliation={name!r} missing boolean is_institution")
+        return affiliations, rejected_reasons
 
     def _extract_numbered_affiliations(self, page_text: str) -> List[str]:
         text = " ".join(str(page_text or "").split())

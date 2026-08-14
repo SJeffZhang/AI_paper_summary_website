@@ -149,7 +149,7 @@ def test_backfill_issue_range_uses_standard_pipeline_without_mysql_bootstrap(mon
     monkeypatch.setattr(backfill_script, "_ensure_prompts_exist", lambda: None)
     monkeypatch.setattr(backfill_script, "ensure_database_ready", lambda: {"database_ready": True})
     monkeypatch.setattr(backfill_script, "_validate_runtime_config", lambda: None)
-    monkeypatch.setattr(backfill_script, "run_checks", lambda: {"kimi_ready": True})
+    monkeypatch.setattr(backfill_script, "run_checks", lambda: {"llm_ready": True})
 
     class RecordingPipeline:
         def __init__(self, db):
@@ -173,7 +173,7 @@ def test_backfill_issue_range_uses_standard_pipeline_without_mysql_bootstrap(mon
     result = backfill_script.backfill_issue_range(date(2026, 3, 25), date(2026, 3, 26))
 
     assert result["database"] == {"database_ready": True}
-    assert result["kimi"] == {"kimi_ready": True}
+    assert result["llm"] == {"llm_ready": True}
     assert result["new_success"] == 2
     assert result["failed"] == 0
     assert executed_issue_dates == [date(2026, 3, 25), date(2026, 3, 26)]

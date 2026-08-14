@@ -6,23 +6,23 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "mysql+pymysql://root:password@localhost:3306/ai_paper_summary"
     BACKEND_PUBLIC_URL: str = "http://localhost:8000"
     FRONTEND_URL: str = "http://localhost:5173"
-    KIMI_API_KEY: str = ""
-    MINIMAX_API_KEY: str = ""
-    KIMI_BASE_URL: str = "https://api.minimaxi.com/v1"
-    KIMI_MODEL: str = "MiniMax-M2.5"
-    KIMI_TIMEOUT_SECONDS: int = 60
-    KIMI_LONGFORM_TIMEOUT_SECONDS: int = 180
-    KIMI_MAX_RETRIES: int = 3
-    KIMI_LONGFORM_MAX_RETRIES: int = 2
-    KIMI_MIN_REQUEST_INTERVAL_SECONDS: float = 5.0
-    KIMI_LONGFORM_MIN_REQUEST_INTERVAL_SECONDS: float = 20.0
-    KIMI_EDITOR_MAX_TOKENS: int = 4096
-    KIMI_WRITER_FOCUS_MAX_TOKENS: int = 4096
-    KIMI_WRITER_WATCHING_MAX_TOKENS: int = 4096
-    KIMI_REVIEWER_MAX_TOKENS: int = 2048
-    KIMI_ABSTRACT_MAX_CHARS: int = 16000
-    KIMI_TITLE_LOCALIZATION_ATTEMPTS: int = 3
-    KIMI_TITLE_BATCH_SIZE: int = 8
+    DEEPSEEK_API_KEY: str = ""
+    LLM_BASE_URL: str = "https://api.deepseek.com"
+    LLM_MODEL: str = "deepseek-v4-flash"
+    LLM_THINKING_ENABLED: bool = False
+    LLM_TIMEOUT_SECONDS: int = 60
+    LLM_LONGFORM_TIMEOUT_SECONDS: int = 180
+    LLM_MAX_RETRIES: int = 3
+    LLM_LONGFORM_MAX_RETRIES: int = 2
+    LLM_MIN_REQUEST_INTERVAL_SECONDS: float = 1.0
+    LLM_LONGFORM_MIN_REQUEST_INTERVAL_SECONDS: float = 2.0
+    LLM_EDITOR_MAX_TOKENS: int = 4096
+    LLM_WRITER_FOCUS_MAX_TOKENS: int = 4096
+    LLM_WRITER_WATCHING_MAX_TOKENS: int = 4096
+    LLM_REVIEWER_MAX_TOKENS: int = 2048
+    LLM_ABSTRACT_MAX_CHARS: int = 16000
+    LLM_TITLE_LOCALIZATION_ATTEMPTS: int = 3
+    LLM_TITLE_BATCH_SIZE: int = 8
     PIPELINE_MAX_CATEGORY_ATTEMPTS: int = 30
     PIPELINE_FOCUS_ATTEMPT_MULTIPLIER: int = 4
     PIPELINE_WATCHING_ATTEMPT_MULTIPLIER: int = 2
@@ -51,7 +51,7 @@ class Settings(BaseSettings):
 
     @property
     def LLM_API_KEY(self) -> str:
-        return (self.MINIMAX_API_KEY or self.KIMI_API_KEY or "").strip()
+        return self.DEEPSEEK_API_KEY.strip()
 
     model_config = SettingsConfigDict(
         env_file=".env",
