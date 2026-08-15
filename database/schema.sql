@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS `paper` (
   `title_zh` VARCHAR(500) NOT NULL,
   `title_original` VARCHAR(500) NOT NULL,
   `authors` JSON NOT NULL,
+  `affiliations` JSON DEFAULT NULL,
   `venue` VARCHAR(255) DEFAULT NULL,
   `abstract` TEXT NOT NULL,
   `pdf_url` VARCHAR(255) NOT NULL,

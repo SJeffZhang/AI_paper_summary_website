@@ -19,13 +19,13 @@ from scripts.setup_local_db import ensure_database_ready
 
 def _validate_runtime_config() -> None:
     required_values = {
-        "KIMI_API_KEY": settings.KIMI_API_KEY.strip(),
-        "KIMI_MODEL": settings.KIMI_MODEL.strip(),
-        "KIMI_BASE_URL": settings.KIMI_BASE_URL.strip(),
+        "LLM_API_KEY": settings.LLM_API_KEY,
+        "LLM_MODEL": settings.LLM_MODEL.strip(),
+        "LLM_BASE_URL": settings.LLM_BASE_URL.strip(),
     }
     missing = [key for key, value in required_values.items() if not value]
     if missing:
-        raise RuntimeError("Missing required Kimi runtime settings: " + ", ".join(missing))
+        raise RuntimeError("Missing required LLM runtime settings: " + ", ".join(missing))
 
 
 def _safe_owner_alert(

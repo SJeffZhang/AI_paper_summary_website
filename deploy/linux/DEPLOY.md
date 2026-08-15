@@ -70,8 +70,7 @@ Manual `.env` baseline:
 - `MYSQL_UNIX_SOCKET=`
 - `BACKEND_PUBLIC_URL=http://43.155.154.193`
 - `FRONTEND_URL=http://43.155.154.193`
-- `MINIMAX_API_KEY=<your-minimax-api-key>`
-- `KIMI_API_KEY=<optional-legacy-key>`
+- `DEEPSEEK_API_KEY=<your-deepseek-api-key>`
 - `SMTP_HOST=smtp.gmail.com`
 - `SMTP_PORT=587`
 - `SMTP_USERNAME=z1332556430@gmail.com`
@@ -230,8 +229,7 @@ Connection:
 Runtime:
 
 - `DATABASE_URL`
-- `MINIMAX_API_KEY`
-- `KIMI_API_KEY` (optional legacy fallback)
+- `DEEPSEEK_API_KEY`
 - `BACKEND_PUBLIC_URL`
 - `FRONTEND_URL`
 - `SMTP_HOST`
@@ -247,35 +245,45 @@ Runtime:
 Optional runtime overrides:
 
 - `MYSQL_UNIX_SOCKET`
-- `KIMI_BASE_URL`
-- `KIMI_MODEL`
-- `KIMI_TIMEOUT_SECONDS`
-- `KIMI_LONGFORM_TIMEOUT_SECONDS`
-- `KIMI_MAX_RETRIES`
-- `KIMI_LONGFORM_MAX_RETRIES`
-- `KIMI_TITLE_BATCH_SIZE`
 - `PIPELINE_MAX_CATEGORY_ATTEMPTS`
 - `PIPELINE_FOCUS_ATTEMPT_MULTIPLIER`
 - `PIPELINE_WATCHING_ATTEMPT_MULTIPLIER`
 - `PIPELINE_ENABLE_WATCHING`
+- `AFFILIATION_ENRICH_TIMEOUT_SECONDS`
+- `AFFILIATION_ENRICH_MAX_RETRIES`
+- `AFFILIATION_ENRICH_PAGE_TEXT_MIN_CHARS`
 - `PIPELINE_REVIEWER_STRICT`
 - `PIPELINE_PROBE_DAYS`
 - `SEMANTIC_SCHOLAR_TIMEOUT_SECONDS`
 - `CRAWLER_CITATION_MAX_WORKERS`
 
-The deploy workflow writes these production defaults directly and does not read them from GitHub Secrets:
+The deploy workflow writes these model and institution defaults directly and does not read them from GitHub Secrets:
 
-- `KIMI_MIN_REQUEST_INTERVAL_SECONDS=1.5`
-- `KIMI_LONGFORM_MIN_REQUEST_INTERVAL_SECONDS=2.5`
-- `KIMI_TITLE_LOCALIZATION_ATTEMPTS=4`
-- `KIMI_EDITOR_MAX_TOKENS=1400`
-- `KIMI_WRITER_FOCUS_MAX_TOKENS=1800`
-- `KIMI_WRITER_WATCHING_MAX_TOKENS=1300`
-- `KIMI_REVIEWER_MAX_TOKENS=512`
+- `LLM_BASE_URL=https://api.deepseek.com`
+- `LLM_MODEL=deepseek-v4-flash`
+- `LLM_THINKING_ENABLED=false`
+- `LLM_TIMEOUT_SECONDS=60`
+- `LLM_LONGFORM_TIMEOUT_SECONDS=180`
+- `LLM_MAX_RETRIES=3`
+- `LLM_LONGFORM_MAX_RETRIES=2`
+- `LLM_MIN_REQUEST_INTERVAL_SECONDS=1`
+- `LLM_LONGFORM_MIN_REQUEST_INTERVAL_SECONDS=2`
+- `LLM_TITLE_LOCALIZATION_ATTEMPTS=3`
+- `LLM_TITLE_BATCH_SIZE=8`
+- `LLM_EDITOR_MAX_TOKENS=4096`
+- `LLM_WRITER_FOCUS_MAX_TOKENS=4096`
+- `LLM_WRITER_WATCHING_MAX_TOKENS=4096`
+- `LLM_REVIEWER_MAX_TOKENS=2048`
+- `AFFILIATION_ENRICH_ENABLED=true`
+
+`DEEPSEEK_API_KEY` is the only model-provider secret. Legacy `KIMI_*` and
+`MINIMAX_API_KEY` secrets must be removed after the DeepSeek secret is configured.
 
 Operational notes:
 
 - The deploy job should be bound to the GitHub `production` Environment.
+- Deployment starts automatically only after CI succeeds for a `main` push; manual
+  dispatch also deploys `main`.
 - CI jobs must not read production secrets.
 - Do not use `pull_request_target` for code that touches deploy secrets.
 - The workflow backs up the existing `.env` before replacing it.

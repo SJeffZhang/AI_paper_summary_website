@@ -70,7 +70,7 @@
 1.  **大小写语义**: 统一采用 **大小写不敏感 (Case-Insensitive)** 匹配。
 2.  **匹配算法**: 必须采用 **单词边界匹配**。在拼接正则前，**必须先对关键词执行字面量转义**（如 Python 的 `re.escape()`），然后再包装为 `\b(?:escaped_keyword)\b`。严禁中间子串匹配。
 3.  **匹配源范围与物理字段 (Scope & Data Source)**:
-    *   **顶尖机构**: 仅匹配 `paper.authors` JSON 数组中各元素的 `affiliation` 字段。
+    *   **顶尖机构**: 优先匹配论文级 `paper.affiliations` JSON 列表；若为空，兼容匹配 `paper.authors` JSON 数组中各元素的 `affiliation` 字段。
     *   **顶会收录**: 仅匹配 `paper.venue` 字段。
     *   **评分信号 (含代码可用) & Taxonomy**: 匹配论文标题 (`title_original`) 和 摘要 (`abstract`)。
 
@@ -207,6 +207,7 @@
 | `title_zh` | VARCHAR(500) | NOT NULL | 中文本地化标题 |
 | `title_original` | VARCHAR(500) | NOT NULL | 论文原始标题 (英文) |
 | `authors` | JSON | NOT NULL | **作者规格**: `[{"name": "...", "affiliation": "..."}]` |
+| `affiliations` | JSON | NULL | 论文级机构列表，如 `["OpenAI", "Stanford University"]` |
 | `venue` | VARCHAR(255) | NULL | **顶会/期刊锚点**: 如 ICLR 2024, arXiv journal-ref |
 | `abstract` | TEXT | NOT NULL | 原始摘要 |
 | `pdf_url` | VARCHAR(255) | NOT NULL | PDF链接 |
@@ -286,13 +287,13 @@
     *   **Params**: `page` (int), `limit` (int, max 100), `category`, `direction`, `issue_date`, `include_candidates` (bool)。
     *   **Response Payload**: `{ "total": INT, "items": [ { "id", "arxiv_id", "title_zh", "title_original", "score", "category", "candidate_reason", "direction", "issue_date", "one_line_summary", "one_line_summary_en" } ] }`。
 2.  **GET /api/v1/papers/{id}** (单篇详情)
-    *   **Response Payload**: 包含列表字段 + `abstract`, `authors`, `venue`, `score_reasons`, `core_highlights`, `core_highlights_en`, `application_scenarios`, `application_scenarios_en`。
+    *   **Response Payload**: 包含列表字段 + `abstract`, `authors`, `affiliations`, `venue`, `score_reasons`, `core_highlights`, `core_highlights_en`, `application_scenarios`, `application_scenarios_en`。
     *   **NULL 契约**: 
         *   若目标论文 `category == 'candidate'`，响应中所有的解读字段 (core_highlights 等) 必须显式返回 `null`。
         *   若目标论文 `category != 'candidate'`，响应中的 `candidate_reason` 必须返回 `null`。
-    *   **作者单位缺失语义**:
-        *   `authors` 中每个元素的 `affiliation` 允许为空字符串；上游来源未提供机构信息时，后端不得伪造作者单位。
-        *   `venue` 仍作为评分与元数据字段保留，但不要求前端详情页将其作为“作者单位”兜底来源。
+    *   **机构缺失语义**:
+        *   `affiliations` 为空时，后端可兼容返回 `authors[].affiliation` 聚合结果；两者均为空时不得伪造机构信息。
+        *   `venue` 仍作为评分与元数据字段保留，但不得作为机构兜底来源。
 3.  **POST /api/v1/subscribe**: `{ "email": "..." }` $\rightarrow$ `{ "code": 200, "msg": "邮件已发送", "data": null }`。
 4.  **GET /api/v1/subscribe/verify**: 验证激活。
     *   **Params**: `token` (string, required)。
@@ -332,10 +333,10 @@
 *   方向标签属于导航入口：首页与详情页中的方向标签必须可点击并跳转到对应方向页。
 
 ### 8.3 详情页事实卡展示规则
-*   详情页顶部事实卡当前固定展示：作者、作者单位、arXiv 编号。
-*   作者单位卡片的数据源为 `authors[].affiliation`，前端需先执行去空与去重。
+*   详情页顶部事实卡当前固定展示：作者、机构、arXiv 编号。
+*   机构卡片的数据源优先为论文级 `affiliations`；为空时兼容 `authors[].affiliation`，前端需先执行去空与去重。
 *   当有效机构数为 1-2 个时，直接展示完整机构名；当机构数 >= 3 时，允许压缩展示，并通过悬停提示暴露完整列表。
-*   若当前论文的 `authors[].affiliation` 全部为空，前端必须明确提示“论文源未提供作者单位 / Affiliation not provided by the source”，不得显示空白，也不应将 `venue` 伪装成作者单位。
+*   若当前论文无有效机构，前端必须明确提示“未识别到论文机构 / Institutions not identified”，不得显示空白，也不应将 `venue` 伪装成机构。
 
 ### 8.4 Mock 预览开关
 *   正式运行与普通本地运行默认请求真实后端 API。

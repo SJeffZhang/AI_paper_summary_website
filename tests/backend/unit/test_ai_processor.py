@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from types import SimpleNamespace
 
@@ -96,7 +98,7 @@ def test_localize_titles_honors_configured_attempts(monkeypatch):
     processor = AIProcessor(api_key="test-key")
     calls = {"count": 0}
 
-    monkeypatch.setattr(settings, "KIMI_TITLE_LOCALIZATION_ATTEMPTS", 1)
+    monkeypatch.setattr(settings, "LLM_TITLE_LOCALIZATION_ATTEMPTS", 1)
 
     def always_fail(**kwargs):
         calls["count"] += 1
@@ -123,8 +125,8 @@ def test_retry_backoff_seconds_scales_for_standard_and_longform_requests():
 
 
 def test_minimum_request_interval_seconds_distinguishes_longform():
-    assert AIProcessor._minimum_request_interval_seconds(longform=False) == 5
-    assert AIProcessor._minimum_request_interval_seconds(longform=True) == 20
+    assert AIProcessor._minimum_request_interval_seconds(longform=False) == 1
+    assert AIProcessor._minimum_request_interval_seconds(longform=True) == 2
 
 
 def test_max_retry_attempts_uses_dedicated_longform_setting():
@@ -304,6 +306,23 @@ def test_run_editor_uses_large_longform_token_budget(monkeypatch):
 
     assert captured["kwargs"]["longform"] is True
     assert captured["kwargs"]["max_tokens"] >= 4096
+
+
+def test_truncate_abstract_defaults_to_configured_16000_chars(monkeypatch):
+    monkeypatch.setattr("app.services.ai_processor.settings.LLM_ABSTRACT_MAX_CHARS", 16000)
+    abstract = "a" * 17000
+
+    truncated = AIProcessor._truncate_abstract(abstract)
+
+    assert len(truncated) == 16000
+    assert truncated.endswith("…")
+
+
+def test_truncate_abstract_can_be_disabled(monkeypatch):
+    monkeypatch.setattr("app.services.ai_processor.settings.LLM_ABSTRACT_MAX_CHARS", 0)
+    abstract = "a" * 17000
+
+    assert AIProcessor._truncate_abstract(abstract) == abstract
 
 
 def test_run_writer_accepts_bracketless_editor_headers(monkeypatch):
@@ -578,7 +597,42 @@ def test_call_llm_uses_non_streaming_for_longform(monkeypatch):
     assert processor._call_llm("system", "user", longform=True) == "hello world"
 
 
-def test_call_llm_normalizes_temperature_for_kimi_k25(monkeypatch):
+def test_call_llm_records_provider_usage_for_successful_response(monkeypatch, tmp_path):
+    processor = AIProcessor(api_key="test-key")
+    usage_path = tmp_path / "usage.jsonl"
+
+    class FakeClient:
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**kwargs):
+                    return SimpleNamespace(
+                        model="deepseek-v4-flash",
+                        choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))],
+                        usage=SimpleNamespace(
+                            prompt_tokens=100,
+                            completion_tokens=20,
+                            total_tokens=120,
+                            prompt_cache_hit_tokens=40,
+                            prompt_cache_miss_tokens=60,
+                            completion_tokens_details=SimpleNamespace(reasoning_tokens=0),
+                        ),
+                    )
+
+    monkeypatch.setattr(settings, "LLM_USAGE_LOG_PATH", str(usage_path))
+    monkeypatch.setattr(processor, "_get_client", lambda timeout_seconds: FakeClient())
+    monkeypatch.setattr(processor, "_respect_request_interval", lambda longform: None)
+
+    assert processor._call_llm("system", "user") == "ok"
+    event = json.loads(usage_path.read_text(encoding="utf-8"))
+    assert event["model"] == "deepseek-v4-flash"
+    assert event["prompt_tokens"] == 100
+    assert event["completion_tokens"] == 20
+    assert event["prompt_cache_hit_tokens"] == 40
+    assert event["prompt_cache_miss_tokens"] == 60
+
+
+def test_call_llm_preserves_explicit_temperature(monkeypatch):
     processor = AIProcessor(api_key="test-key")
     captured = {}
 
@@ -592,9 +646,8 @@ def test_call_llm_normalizes_temperature_for_kimi_k25(monkeypatch):
                         choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))]
                     )
 
-    monkeypatch.setattr(settings, "KIMI_MODEL", "kimi-k2.5")
     monkeypatch.setattr(processor, "_get_client", lambda timeout_seconds: FakeClient())
     monkeypatch.setattr(processor, "_respect_request_interval", lambda longform: None)
 
     assert processor._call_llm("system", "user", temperature=0.0) == "ok"
-    assert captured["kwargs"]["temperature"] == 1.0
+    assert captured["kwargs"]["temperature"] == 0.0

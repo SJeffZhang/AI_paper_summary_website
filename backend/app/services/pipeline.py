@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
 from app.models.domain import Paper, PaperAITrace, PaperSummary, SystemTaskLog
+from app.services.affiliation_enricher import AffiliationEnricher
 from app.services.ai_processor import AIProcessor, StructuredOutputError
 from app.services.crawler import Crawler
 from app.services.notification_service import send_owner_alert, shanghai_today
@@ -39,6 +40,7 @@ class Pipeline:
         self.crawler = Crawler()
         self.scorer = Scorer()
         self.ai_processor = AIProcessor()
+        self.affiliation_enricher = AffiliationEnricher()
 
     def run(self, target_date: str = None) -> None:
         issue_date = self._resolve_issue_date(target_date)
@@ -80,6 +82,8 @@ class Pipeline:
             if not watching_enabled:
                 watching_selected = []
                 watching_overflow = []
+
+            self._enrich_selected_affiliations(focus_selected, watching_selected)
 
             snapshot_papers = scored_papers
             issue_attempted_ids: set[str] = set()
@@ -184,6 +188,43 @@ class Pipeline:
             watching_overflow,
         )
 
+    def _enrich_selected_affiliations(
+        self,
+        focus_selected: Sequence[Dict[str, Any]],
+        watching_selected: Sequence[Dict[str, Any]],
+    ) -> None:
+        if not settings.AFFILIATION_ENRICH_ENABLED:
+            return
+
+        selected_papers = list(focus_selected) + list(watching_selected)
+        total = len(selected_papers)
+        for index, paper in enumerate(selected_papers, start=1):
+            arxiv_id = str(paper.get("arxiv_id") or "")
+            _safe_progress_log(f"[pipeline][affiliation] {index}/{total} start arxiv_id={arxiv_id}")
+            try:
+                result = self.affiliation_enricher.enrich_paper(paper)
+            except Exception as exc:
+                # Institution enrichment is supplementary; do not block daily publication.
+                paper["affiliation_enrich_status"] = "failed"
+                paper["affiliation_enrich_reasons"] = [str(exc)]
+                _safe_progress_log(
+                    f"[pipeline][affiliation] {index}/{total} failed arxiv_id={arxiv_id} error={exc}"
+                )
+                continue
+            paper["affiliation_enrich_status"] = result.status
+            paper["affiliation_enrich_attempts"] = result.attempts
+            if result.reasons:
+                paper["affiliation_enrich_reasons"] = result.reasons
+            if result.status == "overwrite_applied":
+                paper["affiliations"] = result.affiliations
+            _safe_progress_log(
+                (
+                    f"[pipeline][affiliation] {index}/{total} done arxiv_id={arxiv_id} "
+                    f"status={result.status} attempts={result.attempts} "
+                    f"affiliation_count={len(result.affiliations)}"
+                )
+            )
+
     def _start_task(self, issue_date: date) -> SystemTaskLog:
         task_log = self.db.query(SystemTaskLog).filter(SystemTaskLog.issue_date == issue_date).first()
         if task_log and task_log.status == "SUCCESS":
@@ -215,6 +256,8 @@ class Pipeline:
             db_paper.title_zh = meta["title_zh"]
             db_paper.title_original = meta["title_original"]
             db_paper.authors = meta["authors"]
+            if "affiliations" in meta:
+                db_paper.affiliations = meta.get("affiliations") or None
             db_paper.venue = meta.get("venue")
             db_paper.abstract = meta["abstract"]
             db_paper.pdf_url = meta["pdf_url"]
@@ -414,7 +457,7 @@ class Pipeline:
 
         localized_titles = self.ai_processor.localize_titles(
             title_payload,
-            batch_size=settings.KIMI_TITLE_BATCH_SIZE,
+            batch_size=settings.LLM_TITLE_BATCH_SIZE,
             progress_callback=log_title_refresh_batch,
         )
         updated = 0

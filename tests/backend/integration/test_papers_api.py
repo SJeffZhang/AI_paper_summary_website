@@ -46,6 +46,7 @@ def test_get_paper_detail_returns_latest_summary_and_candidate_null_fields(api_c
     assert paper["category"] == "candidate"
     assert paper["issue_date"] == seeded_papers["current_issue_date"].isoformat()
     assert paper["candidate_reason"] == "capacity_overflow"
+    assert paper["affiliations"] == ["Google"]
     assert paper["core_highlights"] is None
     assert paper["application_scenarios"] is None
 

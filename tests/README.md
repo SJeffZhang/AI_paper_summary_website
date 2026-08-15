@@ -28,7 +28,7 @@ Live tests always hit real external services. They do not use recorded responses
 - arXiv: strong failure on request failure, empty response, or malformed fields
 - GitHub Trending: strong failure on request failure, empty response, or malformed fields
 - Semantic Scholar: degradable, only requires the crawler path to return an integer `>= 0`
-- `tests/live/` does not cover real Kimi calls, `run_pipeline_once.py`, local MySQL bootstrap, API assertions, or frontend page integration. Those are validated separately via scripts and manual/browser checks.
+- `tests/live/` does not cover real LLM calls, `run_pipeline_once.py`, local MySQL bootstrap, API assertions, or frontend page integration. Those are validated separately via scripts and manual/browser checks.
 
 ## Notes
 

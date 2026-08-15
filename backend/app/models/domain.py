@@ -22,6 +22,7 @@ class Paper(Base):
     title_zh = Column(String(500), nullable=False)
     title_original = Column(String(500), nullable=False)
     authors = Column(JSON, nullable=False)
+    affiliations = Column(JSON, nullable=True)
     venue = Column(String(255), nullable=True)
     abstract = Column(Text, nullable=False)
     pdf_url = Column(String(255), nullable=False)

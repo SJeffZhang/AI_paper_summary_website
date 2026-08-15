@@ -119,6 +119,9 @@ class Scorer:
 
     @staticmethod
     def _iter_affiliations(paper: Dict[str, Any]) -> Iterable[str]:
+        for affiliation in paper.get("affiliations", []) or []:
+            if affiliation:
+                yield str(affiliation)
         for author in paper.get("authors", []) or []:
             if isinstance(author, dict):
                 affiliation = author.get("affiliation") or ""

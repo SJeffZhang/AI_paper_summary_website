@@ -9,6 +9,7 @@ def test_find_schema_mismatches_accepts_current_v225_sentinels():
             "title_zh": {"type": "varchar(500)", "null": "NO", "key": "", "default": None, "extra": ""},
             "title_original": {"type": "varchar(500)", "null": "NO", "key": "", "default": None, "extra": ""},
             "authors": {"type": "json", "null": "NO", "key": "", "default": None, "extra": ""},
+            "affiliations": {"type": "json", "null": "YES", "key": "", "default": None, "extra": ""},
             "venue": {"type": "varchar(255)", "null": "YES", "key": "", "default": None, "extra": ""},
             "abstract": {"type": "text", "null": "NO", "key": "", "default": None, "extra": ""},
             "pdf_url": {"type": "varchar(255)", "null": "NO", "key": "", "default": None, "extra": ""},

@@ -28,6 +28,7 @@ EXPECTED_COLUMN_RULES = {
         "title_zh": {"type": "varchar(500)", "null": "NO"},
         "title_original": {"type": "varchar(500)", "null": "NO"},
         "authors": {"type": "json", "null": "NO"},
+        "affiliations": {"type": "json", "null": "YES"},
         "venue": {"type": "varchar(255)", "null": "YES"},
         "abstract": {"type": "text", "null": "NO"},
         "pdf_url": {"type": "varchar(255)", "null": "NO"},
@@ -164,6 +165,15 @@ def _execute_sql_file(cursor, path: Path) -> None:
     sql_text = path.read_text(encoding="utf-8")
     for statement in _iter_sql_statements(sql_text):
         cursor.execute(statement)
+
+
+def _ensure_affiliations_column(cursor) -> bool:
+    cursor.execute("SHOW COLUMNS FROM `paper` LIKE 'affiliations'")
+    exists = cursor.fetchone() is not None
+    if exists:
+        return False
+    cursor.execute("ALTER TABLE `paper` ADD COLUMN `affiliations` JSON NULL AFTER `authors`")
+    return True
 
 
 def _normalize_default(value) -> str | None:
@@ -313,16 +323,20 @@ def ensure_database_ready(migrate_existing: bool = False, backfill_title_zh: boo
                 for statement in POST_SCHEMA_FIXES:
                     cursor.execute(statement)
             else:
+                _ensure_affiliations_column(cursor)
+                tables, column_snapshot, index_snapshot, foreign_key_snapshot = _collect_schema_snapshot(cursor)
                 mismatches = _find_schema_mismatches(column_snapshot, index_snapshot, foreign_key_snapshot)
                 if mismatches and not migrate_existing:
                     mismatch_text = "; ".join(mismatches)
                     raise RuntimeError(
-                        "Existing database schema does not match PRD v2.25: "
+                        "Existing database schema does not match the current schema contract: "
                         f"{mismatch_text}. Run `python scripts/setup_local_db.py --migrate-existing` "
-                        "or apply `database/migrate_v225.sql` explicitly before treating the schema as ready."
+                        "or apply `database/migrate_v225.sql` and `database/migrate_v226_affiliations.sql` "
+                        "explicitly before treating the schema as ready."
                     )
                 if mismatches and migrate_existing:
                     _execute_sql_file(cursor, MIGRATION_PATH)
+                    _ensure_affiliations_column(cursor)
                     migration_applied = True
                     _execute_sql_file(cursor, SCHEMA_PATH)
                     for statement in POST_SCHEMA_FIXES:

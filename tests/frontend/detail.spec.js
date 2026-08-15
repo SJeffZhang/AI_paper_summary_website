@@ -69,12 +69,12 @@ describe('Detail view', () => {
       ...focusDetail,
       venue: null,
       authors: [
-        { name: 'Alice', affiliation: 'OpenAI' },
-        { name: 'Bob', affiliation: 'Stanford University' },
-        { name: 'Carol', affiliation: 'Google DeepMind' },
-        { name: 'Dave', affiliation: 'Google DeepMind' },
-        { name: 'Eve', affiliation: 'Anthropic' },
+        { name: 'Alice', affiliation: '' },
+        { name: 'Bob', affiliation: '' },
+        { name: 'Carol', affiliation: '' },
+        { name: 'Dave', affiliation: '' },
       ],
+      affiliations: ['OpenAI', 'Stanford University', 'OpenAI', 'Google DeepMind'],
     })
     const router = await createTestRouter('/paper/:id', '/paper/1', Detail)
 
@@ -88,14 +88,15 @@ describe('Detail view', () => {
     await flushPromises()
 
     const affiliationBlock = wrapper.findAll('.fact-block strong')[1]
-    expect(affiliationBlock.text()).toBe('OpenAI / Stanford University / Google DeepMind 等 1 家机构')
-    expect(affiliationBlock.attributes('title')).toBe('OpenAI\nStanford University\nGoogle DeepMind\nAnthropic')
+    expect(affiliationBlock.text()).toBe('OpenAI, Stanford University, Google DeepMind')
+    expect(affiliationBlock.attributes('title')).toBe('OpenAI\nStanford University\nGoogle DeepMind')
   })
 
   it('shows an explicit fallback when the source does not provide affiliations', async () => {
     getPaperDetailMock.mockResolvedValue({
       ...focusDetail,
       authors: [{ name: 'Alice', affiliation: '' }],
+      affiliations: [],
       venue: null,
     })
     const router = await createTestRouter('/paper/:id', '/paper/1', Detail)
@@ -110,7 +111,7 @@ describe('Detail view', () => {
     await flushPromises()
 
     const affiliationBlock = wrapper.findAll('.fact-block strong')[1]
-    expect(affiliationBlock.text()).toBe('论文源未提供作者单位')
+    expect(affiliationBlock.text()).toBe('未识别到论文机构')
     expect(affiliationBlock.attributes('title')).toBe('')
   })
 

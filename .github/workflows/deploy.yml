@@ -36,15 +36,7 @@ jobs:
       MYSQL_UNIX_SOCKET: ${{ secrets.MYSQL_UNIX_SOCKET }}
       BACKEND_PUBLIC_URL: ${{ secrets.BACKEND_PUBLIC_URL }}
       FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
-      KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
-      MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
-      KIMI_BASE_URL: ${{ secrets.KIMI_BASE_URL }}
-      KIMI_MODEL: ${{ secrets.KIMI_MODEL }}
-      KIMI_TIMEOUT_SECONDS: ${{ secrets.KIMI_TIMEOUT_SECONDS }}
-      KIMI_LONGFORM_TIMEOUT_SECONDS: ${{ secrets.KIMI_LONGFORM_TIMEOUT_SECONDS }}
-      KIMI_MAX_RETRIES: ${{ secrets.KIMI_MAX_RETRIES }}
-      KIMI_LONGFORM_MAX_RETRIES: ${{ secrets.KIMI_LONGFORM_MAX_RETRIES }}
-      KIMI_TITLE_BATCH_SIZE: ${{ secrets.KIMI_TITLE_BATCH_SIZE }}
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
       PIPELINE_MAX_CATEGORY_ATTEMPTS: ${{ secrets.PIPELINE_MAX_CATEGORY_ATTEMPTS }}
       PIPELINE_FOCUS_ATTEMPT_MULTIPLIER: ${{ secrets.PIPELINE_FOCUS_ATTEMPT_MULTIPLIER }}
       PIPELINE_WATCHING_ATTEMPT_MULTIPLIER: ${{ secrets.PIPELINE_WATCHING_ATTEMPT_MULTIPLIER }}
@@ -62,6 +54,9 @@ jobs:
       OWNER_ALERT_EMAIL: ${{ secrets.OWNER_ALERT_EMAIL }}
       SEMANTIC_SCHOLAR_TIMEOUT_SECONDS: ${{ secrets.SEMANTIC_SCHOLAR_TIMEOUT_SECONDS }}
       CRAWLER_CITATION_MAX_WORKERS: ${{ secrets.CRAWLER_CITATION_MAX_WORKERS }}
+      AFFILIATION_ENRICH_TIMEOUT_SECONDS: ${{ secrets.AFFILIATION_ENRICH_TIMEOUT_SECONDS }}
+      AFFILIATION_ENRICH_MAX_RETRIES: ${{ secrets.AFFILIATION_ENRICH_MAX_RETRIES }}
+      AFFILIATION_ENRICH_PAGE_TEXT_MIN_CHARS: ${{ secrets.AFFILIATION_ENRICH_PAGE_TEXT_MIN_CHARS }}
 
     steps:
       - name: Checkout repository
@@ -90,6 +85,7 @@ jobs:
           : "${DATABASE_URL:?DATABASE_URL secret is required}"
           : "${BACKEND_PUBLIC_URL:?BACKEND_PUBLIC_URL secret is required}"
           : "${FRONTEND_URL:?FRONTEND_URL secret is required}"
+          : "${DEEPSEEK_API_KEY:?DEEPSEEK_API_KEY secret is required}"
           : "${SMTP_HOST:?SMTP_HOST secret is required}"
           : "${SMTP_PORT:=587}"
           : "${SMTP_USERNAME:?SMTP_USERNAME secret is required}"
@@ -97,22 +93,22 @@ jobs:
           : "${SMTP_FROM_EMAIL:?SMTP_FROM_EMAIL secret is required}"
           : "${OWNER_ALERT_EMAIL:?OWNER_ALERT_EMAIL secret is required}"
           export MYSQL_UNIX_SOCKET="${MYSQL_UNIX_SOCKET:-}"
-          export KIMI_API_KEY="${KIMI_API_KEY:-}"
-          export MINIMAX_API_KEY="${MINIMAX_API_KEY:-}"
-          export KIMI_BASE_URL="${KIMI_BASE_URL:-https://api.minimaxi.com/v1}"
-          export KIMI_MODEL="${KIMI_MODEL:-MiniMax-M2.5}"
-          export KIMI_TIMEOUT_SECONDS="${KIMI_TIMEOUT_SECONDS:-60}"
-          export KIMI_LONGFORM_TIMEOUT_SECONDS="${KIMI_LONGFORM_TIMEOUT_SECONDS:-180}"
-          export KIMI_MAX_RETRIES="${KIMI_MAX_RETRIES:-3}"
-          export KIMI_LONGFORM_MAX_RETRIES="${KIMI_LONGFORM_MAX_RETRIES:-2}"
-          export KIMI_MIN_REQUEST_INTERVAL_SECONDS="1.5"
-          export KIMI_LONGFORM_MIN_REQUEST_INTERVAL_SECONDS="2.5"
-          export KIMI_EDITOR_MAX_TOKENS="1400"
-          export KIMI_WRITER_FOCUS_MAX_TOKENS="1800"
-          export KIMI_WRITER_WATCHING_MAX_TOKENS="1300"
-          export KIMI_REVIEWER_MAX_TOKENS="512"
-          export KIMI_TITLE_LOCALIZATION_ATTEMPTS="4"
-          export KIMI_TITLE_BATCH_SIZE="${KIMI_TITLE_BATCH_SIZE:-8}"
+          export LLM_BASE_URL="https://api.deepseek.com"
+          export LLM_MODEL="deepseek-v4-flash"
+          export LLM_THINKING_ENABLED="false"
+          export LLM_TIMEOUT_SECONDS="60"
+          export LLM_LONGFORM_TIMEOUT_SECONDS="180"
+          export LLM_MAX_RETRIES="3"
+          export LLM_LONGFORM_MAX_RETRIES="2"
+          export LLM_MIN_REQUEST_INTERVAL_SECONDS="1"
+          export LLM_LONGFORM_MIN_REQUEST_INTERVAL_SECONDS="2"
+          export LLM_EDITOR_MAX_TOKENS="4096"
+          export LLM_WRITER_FOCUS_MAX_TOKENS="4096"
+          export LLM_WRITER_WATCHING_MAX_TOKENS="4096"
+          export LLM_REVIEWER_MAX_TOKENS="2048"
+          export LLM_ABSTRACT_MAX_CHARS="16000"
+          export LLM_TITLE_LOCALIZATION_ATTEMPTS="3"
+          export LLM_TITLE_BATCH_SIZE="8"
           export PIPELINE_MAX_CATEGORY_ATTEMPTS="${PIPELINE_MAX_CATEGORY_ATTEMPTS:-30}"
           export PIPELINE_FOCUS_ATTEMPT_MULTIPLIER="${PIPELINE_FOCUS_ATTEMPT_MULTIPLIER:-4}"
           export PIPELINE_WATCHING_ATTEMPT_MULTIPLIER="${PIPELINE_WATCHING_ATTEMPT_MULTIPLIER:-2}"
@@ -124,6 +120,10 @@ jobs:
           export SMTP_USE_SSL="${SMTP_USE_SSL:-false}"
           export SEMANTIC_SCHOLAR_TIMEOUT_SECONDS="${SEMANTIC_SCHOLAR_TIMEOUT_SECONDS:-5}"
           export CRAWLER_CITATION_MAX_WORKERS="${CRAWLER_CITATION_MAX_WORKERS:-16}"
+          export AFFILIATION_ENRICH_ENABLED=true
+          export AFFILIATION_ENRICH_TIMEOUT_SECONDS="${AFFILIATION_ENRICH_TIMEOUT_SECONDS:-30}"
+          export AFFILIATION_ENRICH_MAX_RETRIES="${AFFILIATION_ENRICH_MAX_RETRIES:-5}"
+          export AFFILIATION_ENRICH_PAGE_TEXT_MIN_CHARS="${AFFILIATION_ENRICH_PAGE_TEXT_MIN_CHARS:-200}"
           python - <<'PY'
           import os
           from pathlib import Path
@@ -184,7 +184,7 @@ jobs:
           rm -f /tmp/ai-paper-summary.backend.env
           cd backend
           venv/bin/pip install -r requirements.txt
-          venv/bin/python -c "import sys; from app.core.config import settings; required = {'DATABASE_URL': settings.DATABASE_URL.strip(), 'BACKEND_PUBLIC_URL': settings.BACKEND_PUBLIC_URL.strip(), 'FRONTEND_URL': settings.FRONTEND_URL.strip(), 'KIMI_MODEL': settings.KIMI_MODEL.strip(), 'SMTP_HOST': settings.SMTP_HOST.strip(), 'SMTP_USERNAME': settings.SMTP_USERNAME.strip(), 'SMTP_PASSWORD': settings.SMTP_PASSWORD.strip(), 'SMTP_FROM_EMAIL': settings.SMTP_FROM_EMAIL.strip(), 'OWNER_ALERT_EMAIL': settings.OWNER_ALERT_EMAIL.strip()}; missing = [name for name, value in required.items() if not value]; llm_api_key = settings.LLM_API_KEY; missing.extend(['MINIMAX_API_KEY or KIMI_API_KEY'] if not llm_api_key else []); sys.exit(f'Missing required settings: {\", \".join(missing)}') if missing else print('Configuration validated.')"
+          venv/bin/python -c "import sys; from app.core.config import settings; required = {'DATABASE_URL': settings.DATABASE_URL.strip(), 'BACKEND_PUBLIC_URL': settings.BACKEND_PUBLIC_URL.strip(), 'FRONTEND_URL': settings.FRONTEND_URL.strip(), 'LLM_MODEL': settings.LLM_MODEL.strip(), 'SMTP_HOST': settings.SMTP_HOST.strip(), 'SMTP_USERNAME': settings.SMTP_USERNAME.strip(), 'SMTP_PASSWORD': settings.SMTP_PASSWORD.strip(), 'SMTP_FROM_EMAIL': settings.SMTP_FROM_EMAIL.strip(), 'OWNER_ALERT_EMAIL': settings.OWNER_ALERT_EMAIL.strip()}; missing = [name for name, value in required.items() if not value]; missing.extend(['DEEPSEEK_API_KEY'] if not settings.LLM_API_KEY else []); sys.exit(f'Missing required settings: {\", \".join(missing)}') if missing else print('Configuration validated.')"
           venv/bin/python scripts/setup_local_db.py
           cd ../frontend
           npm ci

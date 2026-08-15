@@ -1,6 +1,6 @@
 """Live tests for crawler-side external data sources only.
 
-These tests intentionally do not claim end-to-end coverage for Kimi, MySQL
+These tests intentionally do not claim end-to-end coverage for the LLM, MySQL
 bootstrap, run_pipeline_once.py, API reads, or frontend integration.
 """
 
