@@ -29,6 +29,9 @@ def test_github_actions_workflows_exist():
     assert "tests/live" in ci_content
     assert "workflow_run:" in deploy_content
     assert "environment: production" in deploy_content
+    assert "secrets.DEEPSEEK_API_KEY" in deploy_content
+    assert "KIMI_" not in deploy_content
+    assert "MINIMAX_" not in deploy_content
 
 
 def test_frontend_production_env_uses_same_origin_api():

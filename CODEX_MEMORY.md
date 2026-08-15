@@ -1099,5 +1099,10 @@ When continuing work in this repository, read this file first.
 - The daily pipeline now enables paper-level institution extraction by default and production deployment writes `AFFILIATION_ENRICH_ENABLED=true` independently of GitHub Environment secrets. This ensures server syncs run enrichment without requiring a secret update.
 - Only selected Focus/Watching papers are processed. Each paper emits start/end progress logs; a PDF, extraction, or LLM failure is isolated to that paper and cannot fail the daily summary pipeline. Local development may still set `AFFILIATION_ENRICH_ENABLED=false` in `backend/.env`.
 
+## Production LLM Deployment Contract (2026-08-15)
+- `.github/workflows/deploy.yml` now renders production configuration with `DEEPSEEK_API_KEY` as the only provider secret. It fixes all generic `LLM_*` defaults to the current DeepSeek V4 Flash runtime contract and validates `DEEPSEEK_API_KEY` before restarting the backend.
+- Remove legacy `KIMI_*` and `MINIMAX_API_KEY` repository secrets only after adding `DEEPSEEK_API_KEY`; deployment must not use provider-specific legacy settings.
+- README and `deploy/linux/DEPLOY.md` document the fixed production LLM defaults, institution-enrichment enablement, legacy-secret removal, and the main-only automatic deployment trigger.
+
 ## Institution Display (2026-08-15)
 - Detail-page paper-level institution lists use a comma-and-space separator instead of a slash. The full list remains available as newline-separated tooltip text.
