@@ -1106,3 +1106,7 @@ When continuing work in this repository, read this file first.
 
 ## Institution Display (2026-08-15)
 - Detail-page paper-level institution lists use a comma-and-space separator instead of a slash. The full list remains available as newline-separated tooltip text.
+
+## Frontend Dependency Security (2026-08-16)
+- Ran the frontend audit against the official npm registry. A non-breaking `npm audit fix` updated the lockfile's direct and transitive package resolutions (including Axios and Vite dependency chains), reducing the reported 13 vulnerabilities to zero.
+- Verification: `npm run test:run` passed 18 tests, `npm run build` passed, and both production-only and full `npm audit` report zero vulnerabilities. The existing large frontend bundle warning remains unrelated.
