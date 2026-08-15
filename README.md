@@ -329,6 +329,18 @@ cd backend
 ./venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
+### 前端依赖安全检查
+
+使用官方 npm registry 执行安全审计，避免镜像站不支持审计接口导致误报：
+
+```bash
+cd frontend
+npm audit --registry=https://registry.npmjs.org
+```
+
+依赖升级后必须同时执行 `npm run test:run` 与 `npm run build`。不使用
+`npm audit fix --force`，避免未经验证的跨大版本升级。
+
 ### 2. 前端
 
 ```bash
