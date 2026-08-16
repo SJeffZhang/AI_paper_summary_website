@@ -1110,3 +1110,7 @@ When continuing work in this repository, read this file first.
 ## Frontend Dependency Security (2026-08-16)
 - Ran the frontend audit against the official npm registry. A non-breaking `npm audit fix` updated the lockfile's direct and transitive package resolutions (including Axios and Vite dependency chains), reducing the reported 13 vulnerabilities to zero.
 - Verification: `npm run test:run` passed 18 tests, `npm run build` passed, and both production-only and full `npm audit` report zero vulnerabilities. The existing large frontend bundle warning remains unrelated.
+
+## Institution Spacing Contract (2026-08-16)
+- The affiliation extractor must output institution names with their normal English word boundaries, using a single ASCII space between adjacent words. PDF first-page extraction frequently joins words (for example, `FudanUniversity`), but storage and UI output must be `Fudan University`.
+- The extraction prompt now requires this restoration without allowing translation, abbreviation, or invented names. Source-evidence validation accepts a tightly constrained compact-English fallback only for multi-word, at-least-eight-character names, so a correctly restored space does not cause a false retry.

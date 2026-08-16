@@ -203,7 +203,10 @@ class AffiliationEnricher:
                 "# JSON output contract",
                 "Return a JSON object with exactly one field: affiliations.",
                 "affiliations must be an array of objects with name, is_institution, and reason fields.",
-                "name must be an exact organization span copied from the source text.",
+                "name must preserve the institution's official English spelling and word boundaries.",
+                "Use one ASCII space between adjacent English words, even when PDF text extraction joins them "
+                "(for example, output 'Fudan University', not 'FudanUniversity').",
+                "Do not invent, translate, abbreviate, or otherwise change organization names.",
                 "is_institution must be true only for a real university, company, research institute, hospital, or lab.",
                 "Use false for author names, emails, URLs, footnote labels, addresses, funding bodies, paper titles, methods, datasets, and headings.",
                 "reason must be a short explanation; use an empty string when is_institution is true.",
@@ -650,9 +653,16 @@ class AffiliationEnricher:
         if normalized_needle in normalized_haystack:
             return True
         needle_tokens = [token for token in normalized_needle.split() if len(token) > 2]
-        if not needle_tokens:
+        if needle_tokens and all(token in normalized_haystack for token in needle_tokens[:8]):
+            return True
+
+        # PDF text extraction can join adjacent English words. Accept only a long,
+        # multi-word candidate whose compact spelling appears verbatim in the source.
+        if len(needle_tokens) < 2:
             return False
-        return all(token in normalized_haystack for token in needle_tokens[:8])
+        compact_needle = "".join(needle_tokens)
+        compact_haystack = re.sub(r"[^a-z0-9]+", "", normalized_haystack)
+        return len(compact_needle) >= 8 and compact_needle in compact_haystack
 
     @staticmethod
     def _normalize_match_text(value: str) -> str:
