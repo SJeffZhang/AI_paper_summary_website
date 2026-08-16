@@ -69,6 +69,7 @@ def test_enrich_paper_writes_paper_level_affiliations(monkeypatch):
     assert result.affiliation_count == 2
     assert result.affiliations == ["OpenAI", "Stanford University"]
     assert "JSON output contract" in fake_ai.calls[0]["user_content"]
+    assert "Fudan University', not 'FudanUniversity'" in fake_ai.calls[0]["user_content"]
     assert fake_ai.calls[0]["response_format"] == {"type": "json_object"}
     assert len(fake_ai.calls) == 1
 
@@ -257,7 +258,7 @@ def test_strip_title_from_front_matter_removes_exact_title_and_prefix():
 def test_enrich_paper_handles_numbered_affiliation_block_in_one_request(monkeypatch):
     monkeypatch.setattr("app.services.affiliation_enricher.settings.AFFILIATION_ENRICH_PAGE_TEXT_MIN_CHARS", 20)
     fake_ai = FakeAIProcessor([_reviewed_affiliations(
-        {"name": "ZhejiangUniversity", "is_institution": True, "reason": ""},
+        {"name": "Zhejiang University", "is_institution": True, "reason": ""},
         {"name": "StepFun", "is_institution": True, "reason": ""},
     )])
     page_text = (
@@ -279,7 +280,7 @@ def test_enrich_paper_handles_numbered_affiliation_block_in_one_request(monkeypa
     )
 
     assert result.status == "overwrite_applied"
-    assert result.affiliations == ["ZhejiangUniversity", "StepFun"]
+    assert result.affiliations == ["Zhejiang University", "StepFun"]
     assert len(fake_ai.calls) == 1
     assert fake_ai.calls[0]["response_format"] == {"type": "json_object"}
 
