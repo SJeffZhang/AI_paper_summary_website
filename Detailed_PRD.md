@@ -1,350 +1,1382 @@
-# AI论文简报 - 详细需求与系统设计文档 (PRD) - v2.25 (物理规格拼写纠正版)
+# ArxivDaily 详细产品需求文档（PRD）
 
-## 1. 项目愿景与发布准则
-### 1.1 项目定位
-为 AI 开发者提供**高确定性、双语对齐、历史可追溯**的每日技术简报。
+## 第一部分：项目需求
 
-### 1.2 唯一选择权与发布基准 (Quantity-First Tiers & Authority)
-**唯一选择权**: 系统排序引擎 (Scorer) 拥有绝对的候选论文“入选权”。AI 环节 (Editor) 仅负责对已入选论文生成定调简报，无权剔除 or 增加。
-系统按以下**非重叠**逻辑进行筛选，优先保证当期有稳定内容产出：
-1.  **分档过滤 (Thresholding)**: 
-    *   `Focus 候选集`: 评分 $\ge 80$ 分。
-    *   `Watching 候选集`: $50 \le$ 评分 $< 80$ 分。
-2.  **强制截断与归档 (Capacity & Archiving)**: 
-    *   将 `Focus 候选集` 按分数倒序排列，优先截取前 5 篇传入 Focus 解读流。
-    *   若 `Focus 候选集` 不足 5 篇，则从剩余候选中按总分倒序补足，直到达到 5 篇或候选耗尽。
-    *   在剔除已进入 Focus 的论文后，将 `Watching 候选集` 按分数倒序排列，截取最多 12 篇传入 Watching 解读流。
-    *   **Candidate 归档与原子溯源规则**: 满足以下条件的论文在 `paper_summary` 中标记为 `category = 'candidate'`：
-        *   `low_score`: 评分 $< 50$ 的全量抓取论文。**原子写入**: `category = 'candidate'`, `candidate_reason = 'low_score'`。
-        *   `capacity_overflow`: 评分 $\ge 50$ 但在 Top 5/12 容量限制之外的论文。**原子写入**: `category = 'candidate'`, `candidate_reason = 'capacity_overflow'`。
-        *   `reviewer_rejected`: 进入了解读流但最终被 Reviewer 标记为 `REJECTED` 的论文。**原子写入**: `category = 'candidate'`, `candidate_reason = 'reviewer_rejected'`。
-    *   **阈值语义说明**: `score >= 80` 与 `50 <= score < 80` 是优先分档规则，而非最终发布的绝对硬门槛。在数量优先模式下，系统允许将高分但未达阈值的剩余论文补位进入 Focus，以保证当期有稳定产出。
-3.  **数量优先发布策略 (Quantity-First Release Policy)**:
-    *   **日常发布目标**: 系统优先保证当期有内容产出，不再以 `Focus < 3` 或 `Watching < 8` 作为日常发布失败条件。
-    *   **Focus 选取规则**:
-        *   优先选择所有 `score >= 80` 的论文，按分数倒序截取前 5 篇。
-        *   若 `score >= 80` 的论文不足 5 篇，则从剩余候选中按总分倒序补足，直到达到 5 篇或候选耗尽。
-    *   **Watching 选取规则**:
-        *   在剔除已进入 Focus 的论文后，从 `50 <= score < 80` 的论文中按分数倒序截取最多 12 篇。
-        *   Watching 允许少于 8 篇，必要时可为 0 篇。
-    *   **后置审计与补位状态迁移 (Backfill & State Transition)**:
-        *   若 Reviewer 剔除导致 Focus 或 Watching 数量下降，系统应从对应候选集中按分数倒序递推补位，直到恢复目标数量或候选耗尽。
-        *   **排除规则 (Blacklist)**: 在当期任务中，任何曾被标记为 `REJECTED` 的论文将永久进入“补位黑名单”，严禁在该期号内再次被提取补位。
-        *   **正向迁移 (Promotion)**: 补位流程通过 **UPDATE (原子更新)** 将记录从 `candidate` 变迁至 `focus/watching`，填充 narrative 字段，且**必须将 `candidate_reason` 物理重置为 NULL**。
-        *   **逆向迁移 (Demotion)**: 若 Reviewer 拒绝某篇论文，系统必须通过 **UPDATE (原子更新)** 将其 `category` 设为 `candidate`，`candidate_reason = 'reviewer_rejected'`，且必须将所有 narrative 解读字段**物理重置为 NULL**。
-    *   **日常失败条件**:
-        *   当日抓取结果为空；
-        *   AI 流水线解析/审核/持久化失败；
-        *   任务执行过程发生不可恢复异常。
+### 1.1 项目概述与产品定位
 
----
+ArxivDaily 是一个面向 AI 开发者、研究工程师和技术读者的中英文论文日报网站。它每天从外部论文来源获取研究内容，结合社区关注度、作者机构、工程相关性等信号排序，选出少量值得优先阅读的论文，使用大语言模型生成结构化解读，再通过网页和邮件分发。
 
-## 2. 全局业务逻辑规范 (Business Logic)
+用户打开网站后，应当能够依次回答四个问题：这一期有什么值得看的研究；某篇论文解决了什么问题、有什么贡献；它可能用于什么场景；如果需要进一步确认，原论文在哪里。用户也可以查看历史日期、围绕一个技术方向持续阅读，或者查看某一天的评分结果，了解哪些论文没有进入最终简报。
 
-### 2.1 跑批节奏 (T+3 Rule)
-*   **规则**: 每日 (UTC+8) 执行跑批，处理发布于 3 天前的 arXiv 论文。
-*   **日期语义**: 
-    *   `arxiv_publish_date`: 论文原始发布日。
-    *   `issue_date`: 简报期号/发布日 (即 `arxiv_publish_date + 3`)。
-    *   `fetch_date`: 数据采集基准日 (即 `issue_date - 3`)。
+项目包含两条互相衔接的产品链路：后台完成“发现论文—打分—选择—生成解读—审核—保存”，读者端完成“浏览简报—阅读详情—打开原文—回看历史或订阅邮件”。网页读取已经保存的数据，不会在每次读者打开页面时重新调用模型生成内容。
 
-### 2.2 幂等性与任务状态机 (Idempotency)
-1.  **Paper-Level**: `arxiv_id` 唯一。重复抓取执行 `UPDATE` 更新元数据（如 upvotes）。
-2.  **Summary-Level**: `(paper_id, issue_date)` 联合唯一。确保同一批次内不会出现重复解读快照。
-3.  **Task-Level**: `system_task_log` 表以 `issue_date` 唯一。
-    *   **状态机**: `RUNNING` -> `SUCCESS` / `FAILED`。
-    *   **防重入**: 若当日任务已处于 `SUCCESS` 状态，严禁自动重跑，必须由管理员显式清除状态。
+### 1.2 项目背景与需求分析
 
-### 2.3 历史回填执行约束 (Historical Backfill Execution)
-*   **适用范围**: 用于补齐历史 `issue_date` 的数据库记录，由专门回填脚本批量触发。
-*   **语义说明**: 历史回填默认沿用与日常发布一致的选题、AI 流和持久化契约，不额外引入更严格的供给门槛。
-*   **执行目标**: 优先补齐历史期的可展示内容；若某个 `issue_date` 外部抓取结果为空，该天可独立失败而不阻塞整段回填。
-*   **可追溯性**: 历史补齐必须通过明确的批处理入口执行，并在 `system_task_log` 中留下对应 `issue_date` 的任务记录。
+1. **论文来源分散。** 读者需要在论文站点和社区推荐列表之间切换；项目将这些信息整理成统一的期号列表。
+2. **每天的信息量超过阅读时间。** 项目用公开可解释的规则缩小优先阅读范围，并区分重点解读与简短关注。
+3. **仅有英文标题和摘要时，快速判断价值的成本高。** 项目提供中文标题，以及中英文的一句话总结、核心亮点、应用场景。
+4. **推荐结果缺少解释。** 项目保留总分、加分来源、最终档位和未入选原因，供读者在候选池查看。
+5. **短期浏览难以形成长期积累。** 项目按发布日期保存简报快照，提供日历和技术方向入口。
+6. **用户不一定每天主动访问。** 邮件订阅将每日简报送到已验证邮箱。
+7. **自动生产出现问题时难以追踪。** 系统保存任务结果和 AI 阶段产物，并提供失败告警、历史回填与重试入口。
 
----
+### 1.3 目标用户与应用场景
 
-## 3. 评分引擎与 Taxonomy 策略
+| 使用者 | 具体场景 | 需要完成的事 | 当前提供的能力 |
+| --- | --- | --- | --- |
+| AI 开发者 | 每天开始工作前了解研究动态 | 快速找到值得进一步阅读的几篇论文 | 首页 Focus / Watching、中文总结、评分信号 |
+| 研究工程师 | 判断新方法是否与当前课题有关 | 阅读贡献、应用场景并核对原论文 | 详情页、英文切换、原始摘要、PDF 与 arXiv 链接 |
+| 关注某一技术的读者 | 持续跟进 Agent、RAG 等方向 | 按方向浏览历史精选 | 分类总览、方向页、分页 |
+| 希望了解推荐依据的读者 | 看到某篇低分或未入选论文 | 理解评分和分层结果 | 当期候选池、8 类信号、未入选原因 |
+| 邮件订阅者 | 不定期访问网站 | 接收简报、打开详情、随时退订 | 邮箱验证、日报邮件、退订链接 |
+| 项目维护者 | 日常生产、补历史数据、排查失败 | 执行任务、检查结果、重试或修复 | 命令行脚本、任务表、AI trace、邮件投递日志 |
 
-### 3.1 评分与分类执行契约 (Matching Protocol)
-所有基于关键词的评分（机构/信号）和分类（Taxonomy）匹配必须遵循以下形式化规则：
-1.  **大小写语义**: 统一采用 **大小写不敏感 (Case-Insensitive)** 匹配。
-2.  **匹配算法**: 必须采用 **单词边界匹配**。在拼接正则前，**必须先对关键词执行字面量转义**（如 Python 的 `re.escape()`），然后再包装为 `\b(?:escaped_keyword)\b`。严禁中间子串匹配。
-3.  **匹配源范围与物理字段 (Scope & Data Source)**:
-    *   **顶尖机构**: 优先匹配论文级 `paper.affiliations` JSON 列表；若为空，兼容匹配 `paper.authors` JSON 数组中各元素的 `affiliation` 字段。
-    *   **顶会收录**: 仅匹配 `paper.venue` 字段。
-    *   **评分信号 (含代码可用) & Taxonomy**: 匹配论文标题 (`title_original`) 和 摘要 (`abstract`)。
+普通读者不需要登录；订阅只需要邮箱验证。维护者通过服务器、脚本和数据库操作维护系统，当前没有独立的后台管理页面，也没有网页管理员账号体系。
 
-### 3.2 8类信号判定逻辑
-| 信号 | 加分 | 触发逻辑 |
-| :--- | :--- | :--- |
-| **顶尖机构** | +20 | 匹配下述 45 个机构全量白名单。 |
-| **HF 推荐** | +30 | 存在于当日 Hugging Face Daily 列表。 |
-| **社区热度** | 0-40 | `[10, 50)`: +10; `[50, 100)`: +20; `[100, ∞)`: +40 upvotes。 |
-| **顶会收录** | +25 | 匹配关键词：ICLR, NeurIPS, CVPR, ICML, ACL, EMNLP。 |
-| **代码可用** | +20 | 标题或摘要包含 github.com 链接或 Official Code 声明。 |
-| **从业者相关性**| +15 | 匹配关键词：Deploy, Quantization, RAG, Inference, Agent。 |
-| **学术影响力** | 0-30 | **计算公式**: `score = min(30, citations * 2)`。 |
-| **开源热度** | +25 | 代码库位于抓取的 GitHub Trending 实时日榜。 |
+### 1.4 项目目标与功能验收标准
 
-*   **顶尖机构全量白名单 (Whitelist)**:
-    Google, DeepMind, OpenAI, Meta, FAIR, Microsoft, Anthropic, NVIDIA, Stanford, MIT, UC Berkeley, Carnegie Mellon, CMU, Harvard, Oxford, Cambridge, Princeton, ETH Zurich, Tsinghua University, Peking University, THU, PKU, Shanghai Jiao Tong, SJTU, Fudan University, Zhejiang University, ZJU, Huawei, Noah's Ark, Baidu, Tencent, Alibaba, DAMO Academy, ByteDance, TikTok, Kuaishou, SenseTime, MEGVII, IBM Research, Amazon, Salesforce, Apple AI, Hugging Face, Allen Institute, AI21.
+| 目标 | 具体结果 | 当前验收口径 |
+| --- | --- | --- |
+| 提供每天可读的研究简报 | 每期显示重点论文与次级关注论文 | 正常完成的流水线至少成功处理 1 篇；不要求每天满额 |
+| 控制每日阅读规模 | 重点和关注内容分层 | Focus 最多 5 篇，Watching 最多 12 篇 |
+| 提供可理解的解读 | 读者可直接看到贡献与用途 | 非 Candidate 内容包含 6 个中英文解读字段；Focus 每种语言 3–5 条亮点，Watching 1–2 条 |
+| 保留选择依据 | 可以回看当期评分结果 | 保留当期全部评分论文的快照，包含分数、方向、分层、加分项和候选原因；候选池每页 50 条 |
+| 支持历史阅读 | 可以按期号和方向找内容 | 首页日期切换；方向页显示跨期精选并分页 |
+| 支持主动分发 | 已确认邮箱收到当期简报 | 只向活跃订阅者发送，且要求目标期号任务成功、有可发布内容 |
+| 支持维护与排查 | 失败有记录、可恢复执行 | 任务状态、错误日志、阶段 trace、投递日志及相关脚本 |
 
-### 3.3 技术方向分类规范 (Taxonomy Rules)
-*   **单选原则**: 每篇论文必须且仅能归属于一个固定方向。
-*   **优先级匹配**: 按以下固定枚举与关键词集顺序执行正则匹配，第一命中即为最终归属。
-    1.  **Agent**: `agent, tool use, autonomous, planning`
-    2.  **Reasoning**: `reasoning, chain-of-thought, cot, math, theorem`
-    3.  **Training_Opt**: `quantization, lora, peft, distributed training, optimization, memory-efficient`
-    4.  **RAG**: `rag, retrieval-augmented, vector database, long-context`
-    5.  **Multimodal**: `multimodal, vision-language, vlm, cross-modal`
-    6.  **Code_Intelligence**: `code generation, code completion, program synthesis`
-    7.  **Vision_Image**: `diffusion, image generation, segmentation, stable diffusion`
-    8.  **Video**: `video generation, video understanding, sora, temporal consistency`
-    9.  **Safety_Alignment**: `rlhf, alignment, red teaming, jailbreak, safety, toxicity`
-    10. **Robotics**: `robotics, embodied ai, manipulation, navigation`
-    11. **Audio**: `audio generation, speech recognition, tts, asr`
-    12. **Interpretability**: `interpretability, mechanistic, attention map, explainable`
-    13. **Benchmarking**: `benchmark, evaluation, dataset, metric`
-    14. **Data_Engineering**: `synthetic data, data curation, data pipeline, pre-training data`
-    15. **Industry_Trends**: `survey, review, perspective, roadmap`
+上述是功能验收目标。代码中没有统计用户阅读完成率、点击转化率、节约阅读时间或订阅增长率的分析系统，也没有实现相应业务指标仪表盘，不能把这些指标写成已经达成的结果。
 
----
+### 1.5 术语与核心概念定义
 
-## 4. AI 生产流水线强契约 (Strict AI Contracts)
+| 概念 | 面向读者的解释 | 影响 |
+| --- | --- | --- |
+| 论文 | 来自外部来源的一项研究，包含标题、作者、摘要和原文入口 | 同一论文可能出现在不止一期简报中 |
+| 期号 / `issue_date` | 这份简报归属的日期 | 首页一次只展示一期；不同于论文原始发表日期 |
+| 抓取基准日 / `fetch_date` | 后台尝试获取论文的目标日期 | 默认是期号减 3 天；空结果时继续向前寻找 |
+| Focus | 优先阅读、提供较完整亮点解读的论文 | 最多 5 篇；先选高分，不足时按排名补位 |
+| Watching | 次级关注、提供更精简解读的论文 | 最多 12 篇；从剩余 50–79 分论文中选取 |
+| Candidate | 保留在当期快照中、未成为最终解读内容的论文 | 不展示正式 AI 解读，只保留基础信息与筛选状态 |
+| 候选池页面 | 某一期保存下来的全部评分记录 | 同时包含 Focus、Watching 和 Candidate，不等于只显示 Candidate |
+| 方向 / `direction` | 论文归属的一个技术类别 | 当前固定 15 个，单篇只分配一个 |
+| 快照 | 某篇论文在某一期的评分、分类和解读结果 | 用于历史列表，不会在读者访问时实时重新打分 |
+| AI 过程留痕 / trace | 模型各阶段生成或审核的中间文本 | 用于维护排障，前端不提供查看入口 |
 
-### 4.1 阶段一：Editor (选题与定调)
-*   **输出模板 (强制执行)**: 
-    ```markdown
-    ## 论文: [arxiv_id]
-    - **写作角度**: [为 Writer 指定切入点]
-    - **核心痛点**: [原有问题描述]
-    - **具体解法**: [方案简述]
-    ```
-*   **提取正则与重试规则**: 
-    *   **Block 切分算法**: 
-        1. `blocks = re.split(r"## 论文: \[(.*?)\]", output)`
-        2. **零前缀校验**: `blocks[0]` 必须为空或仅包含空白字符。若包含杂质文本，直接判定解析失败并触发重试。
-        3. `records = list(zip(blocks[1::2], blocks[2::2]))` (注: 索引 0 已校验，跳过)。
-    *   **完整性校验 (Integrity Check)**: 
-        1. 记录数校验: `len(records)` 必须等于该批次输入的论文总数。
-        2. ID 集合校验: `set(extracted_ids)` 必须与输入的 `set(input_arxiv_ids)` 完全一致。
-    *   **属性提取 (针对每条 record 的 content)**: `re.search(r"- \*\*写作角度\*\*: (.*?)\n", block)`, `re.search(r"- \*\*核心痛点\*\*: (.*?)\n", block)`, `re.search(r"- \*\*具体解法\*\*: (.*?)\n", block)`。
-    *   **失败终态**: 校验失败重试 2 次。若最终不通过，整批任务标记为 `FAILED`。
+例如，`2026-09-07` 这期会先尝试获取 `2026-09-04` 的论文；若没有结果，则尝试 9 月 3 日、2 日、1 日，找到第一组非空结果就停止。最终网页期号仍然是 9 月 7 日。不能把期号永远解释成某篇论文发表日期加 3 天。
 
-### 4.2 阶段二：Writer (双语撰写与层级/对称审计)
-*   **输出模板 (强制执行)**:
-    ```markdown
-    ## [arxiv_id]
-    - **一句话总结**: [中文内容]
-    - **One-line Summary**: [English Content]
-    - **核心亮点**:
-      - [亮点1_CN]
-    - **Core Highlights**:
-      - [亮点1_EN]
-    - **应用场景**: [中文内容]
-    - **Application Scenarios**: [English Content]
-    ```
-*   **机械级解析规则**:
-    1.  **Block 切分算法**: 
-        1. `blocks = re.split(r"## \[(.*?)\]", writer_output)`
-        2. **零前缀校验**: `blocks[0]` 必须为空或仅包含空白字符。若包含杂质文本，直接判定解析失败并触发重试。
-        3. `records = list(zip(blocks[1::2], blocks[2::2]))`。
-    2.  **完整性校验 (Integrity Check)**:
-        1. 记录数校验: `len(records)` 必须等于该批次输入的论文总数。
-        2. ID 集合校验: `set(extracted_ids)` 必须与输入集合完全一致。
-    3.  **属性提取 (针对 content)**:
-        *   中文总结: `re.search(r"- \*\*一句话总结\*\*: (.*?)\n", block)`
-        *   英文总结: `re.search(r"- \*\*One-line Summary\*\*: (.*?)\n", block) `
-        *   中文亮点: `re.search(r"- \*\*核心亮点\*\*:\n(.*?)\n- \*\*Core Highlights\*\*:", block, re.S)`
-        *   英文亮点: `re.search(r"- \*\*Core Highlights\*\*:\n(.*?)\n- \*\*应用场景\*\*:", block, re.S)`
-        *   中文场景: `re.search(r"- \*\*应用场景\*\*: (.*?)\n", block)`
-        *   英文场景: `re.search(r"- \*\*Application Scenarios\*\*: (.*?)(?:\n|$)", block, re.S)`
-*   **硬性审计校验规则**:
-    1.  **非空校验**: 所有 6 个提取出的文本块必须全非空。
-    2.  **双语对称校验**: `核心亮点 (CN)` 与 `Core Highlights (EN)` 的列表项数量必须完全一致。
-    3.  **层级长度约束**: `Focus` 亮点数量 $\in [3, 5]$，`Watching` 亮点数量 $\in [1, 2]$。
-    4.  **失败终态**: 审计失败重试 2 次。若最终不达标，该批次任务正式 `FAILED`。
+### 1.6 功能需求
 
-### 4.3 阶段三：Reviewer (结论与剔除)
-*   **输出模板 (强制执行)**: 
-    必须且只能出现以下两种块结构之一，正则匹配必须严格校验括号。
-    *   **全量通过态**:
-        ```markdown
-        - **整体结论**: PASSED
-        - **拒绝名单**: []
-        ```
-    *   **触发剔除态**:
-        ```markdown
-        - **整体结论**: REJECTED
-        - **拒绝名单**: [arxiv_id_1, arxiv_id_2]
-        ```
-*   **提取规则与终态**:
-    *   结论: `re.search(r"- \*\*整体结论\*\*: (PASSED|REJECTED)", output)`。
-    *   名单: `re.search(r"- \*\*拒绝名单\*\*: \[(.*?)\]", output)`。
-    *   **失败终态**: 若解析连续 2 次失败，或剔除后篇数跌破基准且补位耗尽，任务正式标记为 `FAILED` 并持久化错误日志。
+#### 1.6.1 论文自动采集与元数据整合
 
-### 4.4 AI 过程留痕 (中间产物入库)
-*   `Editor -> Writer -> Reviewer` 的中间产物必须落库，不能只保留最终 narrative。
-*   留痕粒度要求：
-    1. 以 `paper_summary` 为锚点逐篇存储；
-    2. 至少记录 `stage`、`attempt_no`、`stage_status`、`content`；
-    3. `Editor` 与 `Writer` 存逐篇块内容，`Reviewer` 存本轮审核结论文本；
-    4. 若同一批次出现重试，必须保留每一轮 attempt，不能用最后一轮覆盖前一轮。
-*   产品呈现要求：
-    1. AI 过程留痕默认用于数据库审计、排障与质检，不要求在前端详情页直接展示；
-    2. `candidate` 若曾进入 AI 流且后续被 Reviewer 剔除，也应保留过程留痕；
-    3. narrative 字段在 `candidate` 状态下仍必须物理为 `NULL`，但 AI trace 不应被清空。
+系统从 Hugging Face Daily Papers 和 arXiv 获取论文主数据，统一标题、摘要、作者、单位、日期和 PDF 地址。arXiv 当前覆盖人工智能、计算语言学、机器学习、计算机视觉、多智能体、信息检索六类。来自多个来源但 `arxiv_id` 字符串相同的记录合并，优先保留更丰富的信息。
 
----
+GitHub Trending 用来补充开源趋势信号，Semantic Scholar 用来补充引用次数。两者不单独创建论文记录。来源失败允许降级：一个主来源失败时仍可使用另一个来源；辅助信号失败时对应信号按缺失处理。所有抓取尝试都没有论文时，当期失败，不创建虚构内容。
 
-## 5. 数据库全量物理规格 (Database Dialect: MySQL 8.0+)
+系统已实现 PDF 首页文本提取，用于识别论文机构；临时下载文件完成提取后删除。当前没有针对 PDF 全文生成解读、抽取论文图片表格、抓取完整参考文献或复现实验的流程。正式 AI 解读主要依据标题、摘要和已有元数据。
 
-### 5.1 `paper` (静态元数据)
-| 字段 | 类型 | 约束 | 描述 |
-| :--- | :--- | :--- | :--- |
-| `id` | INT | PK, AUTO_INCREMENT | - |
-| `arxiv_id` | VARCHAR(50) | UNIQUE, NOT NULL | 核心凭证 |
-| `title_zh` | VARCHAR(500) | NOT NULL | 中文本地化标题 |
-| `title_original` | VARCHAR(500) | NOT NULL | 论文原始标题 (英文) |
-| `authors` | JSON | NOT NULL | **作者规格**: `[{"name": "...", "affiliation": "..."}]` |
-| `affiliations` | JSON | NULL | 论文级机构列表，如 `["OpenAI", "Stanford University"]` |
-| `venue` | VARCHAR(255) | NULL | **顶会/期刊锚点**: 如 ICLR 2024, arXiv journal-ref |
-| `abstract` | TEXT | NOT NULL | 原始摘要 |
-| `pdf_url` | VARCHAR(255) | NOT NULL | PDF链接 |
-| `upvotes` | INT | DEFAULT 0 | 社区点赞 |
-| `arxiv_publish_date` | DATE | INDEX, NOT NULL | 原始发布日期 |
+#### 1.6.2 论文评分与分层筛选
 
-### 5.2 `paper_summary` (期号快照与解读)
-**物理 NULL 约束**: 当 `category = 'candidate'` 时，表中的解读字段 (9-14) **必须存储为物理 NULL 值**。当 `category != 'candidate'` 时，`candidate_reason` **必须清空为 NULL**。
-| 字段 | 类型 | 约束 | 描述 |
-| :--- | :--- | :--- | :--- |
-| 1. `id` | INT | PK, AUTO_INCREMENT | - |
-| 2. `paper_id` | INT | FK(paper.id), NOT NULL | 关联主表 |
-| 3. `issue_date` | DATE | INDEX, NOT NULL | 发布期号 |
-| 4. `score` | INT | NOT NULL, DEFAULT 0 | 总分快照 |
-| 5. `score_reasons` | JSON | NULL | 加分明细快照 |
-| 6. `category` | ENUM('focus', 'watching', 'candidate') | INDEX, NOT NULL | 档位快照 |
-| 7. `candidate_reason`| ENUM('low_score', 'capacity_overflow', 'reviewer_rejected') | NULL | 候选原因 (仅 category=candidate 时有效) |
-| 8. `direction` | ENUM('Agent', 'Reasoning', 'Training_Opt', 'RAG', 'Multimodal', 'Code_Intelligence', 'Vision_Image', 'Video', 'Safety_Alignment', 'Robotics', 'Audio', 'Interpretability', 'Benchmarking', 'Data_Engineering', 'Industry_Trends') | INDEX, NOT NULL | 分类快照 |
-| 9. `one_line_summary` | TEXT | NULL | 中文一句话总结 |
-| 10. `one_line_summary_en` | TEXT | NULL | 英文一句话总结 |
-| 11. `core_highlights` | JSON | NULL | 中文核心亮点 (List) |
-| 12. `core_highlights_en` | JSON | NULL | 英文核心亮点 (List) |
-| 13. `application_scenarios` | TEXT | NULL | 中文应用场景 |
-| 14. `application_scenarios_en`| TEXT | NULL | 英文应用场景 |
-*   **UK约束**: `UNIQUE KEY uk_paper_issue (paper_id, issue_date)`。
+每篇论文累计 8 类信号分数：机构、HF 推荐、点赞热度、会议、代码信号、工程相关性、引用影响、GitHub 趋势。分数用于排序和辅助判断，不是百分制置信度，也不是论文科学质量的独立认证；正常非负输入下理论最高分为 205。
 
-### 5.3 `paper_ai_trace` (AI 中间产物留痕)
-| 字段 | 类型 | 约束 | 描述 |
-| :--- | :--- | :--- | :--- |
-| `id` | INT | PK, AUTO_INCREMENT | - |
-| `paper_summary_id` | INT | FK(paper_summary.id), NOT NULL | 关联期号快照 |
-| `stage` | ENUM('editor', 'writer', 'reviewer') | INDEX, NOT NULL | AI 角色阶段 |
-| `stage_status` | ENUM('generated', 'accepted', 'rejected', 'invalid') | NOT NULL | 当前阶段在该论文上的状态；`invalid` 用于记录格式不合法、包装噪声或解析失败的原始输出 |
-| `attempt_no` | INT | NOT NULL, DEFAULT 1 | 第几轮生成/审核 |
-| `content` | TEXT | NOT NULL | 对应阶段的原始文本产物 |
-| `created_at` | DATETIME | DEFAULT CURRENT_TIMESTAMP | 产物入库时间 |
-*   **UK约束**: `UNIQUE KEY uk_trace_summary_stage_attempt (paper_summary_id, stage, attempt_no)`。
+合并后的全部论文先评分，再按总分降序执行选题。系统保留当期全部评分论文的快照，没有每日 50 篇截断；候选池的 50 是单页显示数量。抓取数量表示合并后的供给，快照数量表示已保存记录，最终解读数量表示完成 AI 处理的结果，三者不能混用。
 
-### 5.4 `subscriber` (订阅系统)
-| 字段 | 类型 | 约束 | 描述 |
-| :--- | :--- | :--- | :--- |
-| `id` | INT | PK, AUTO_INCREMENT | - |
-| `email` | VARCHAR(255) | UNIQUE, NOT NULL | 邮箱 |
-| `status` | INT | INDEX, DEFAULT 0 | 0:未验证, 1:活跃, 2:退订 |
-| `verify_token` | VARCHAR(64) | UNIQUE, NULL | 激活令牌 |
-| `unsub_token` | VARCHAR(64) | UNIQUE, NULL | 退订令牌 |
-| `verify_expires_at` | DATETIME | NULL | 激活过期 (24h) |
-| `unsub_expires_at` | DATETIME | NULL | 退订过期 (24h) |
+Focus 先选不低于 80 分的前 5 篇；不足 5 篇时，从其他论文按排名补位，甚至允许低于 50 分的论文进入 Focus。Watching 从未进入初始 Focus 的、50 分及以上且低于 80 分的论文中取前 12 篇。最终是否发布还受 AI 处理、审核和补位结果影响，不保证每天有 17 篇。
 
-### 5.5 `system_task_log` (任务追踪)
-| 字段 | 类型 | 约束 | 描述 |
-| :--- | :--- | :--- | :--- |
-| `id` | INT | PK, AUTO_INCREMENT | - |
-| `issue_date` | DATE | UNIQUE, NOT NULL | 绑定单一批次 |
-| `status` | VARCHAR(20) | NOT NULL | `RUNNING`, `SUCCESS`, `FAILED` |
-| `fetched_count` | INT | DEFAULT 0 | 采集候选数 |
-| `processed_count` | INT | DEFAULT 0 | 成功解读数 |
-| `error_log` | TEXT | NULL | 失败堆栈/详情 |
-| `started_at` | DATETIME | DEFAULT CURRENT_TIMESTAMP | - |
-| `finished_at` | DATETIME | NULL | - |
+#### 1.6.3 双语解读生成与质量审核
 
----
+每篇选题依次完成中文标题本地化、Editor 定调、Writer 写作、Reviewer 审核。Editor 解释问题与方法，Writer 生成供读者阅读的内容，Reviewer 检查输出是否适合发布。
 
-## 6. 全量 API 执行契约 (API Contracts)
+正式解读包含：中文一句话总结、英文一句话总结、中文亮点列表、英文亮点列表、中文应用场景、英文应用场景。中英文亮点数量一致。Focus 讲得更完整，Watching 更简短。
 
-### 6.1 统一 JSON 响应 Envelope
+单篇处理失败会降级并尝试其他论文，不会仅因一篇失败就立即取消整期。审核默认严格；代码也提供非严格模式开关，该模式会改变拒绝结果是否阻止发布，详见第四部分。标题翻译失败时可保留“待翻译：原题”占位，因此当前不保证每个标题都已成功译成中文。
+
+#### 1.6.4 日报浏览与历史期号检索
+
+首页加载可用日期范围，默认打开最近有精选内容的一期。用户选择其他日期后，页面同时替换该期的 Focus、Watching 和数量统计，地址保留 `date` 查询参数，便于刷新或分享。
+
+日历区分有数据、无数据和超出范围的日期。范围内的无数据日期仍可点击并显示空状态，超出范围的日期不可选。不会把多天混在同一首页列表中。
+
+#### 1.6.5 论文详情展示与原文访问
+
+用户从首页或方向页打开论文详情，查看当前语言的解读和作者信息，并打开 PDF 或 arXiv 原页。原始摘要保持来源语言，不随界面切换重新翻译。
+
+机构优先显示论文级机构列表，缺失时兼容作者元数据中的单位；两者均无有效内容时提示“未识别到论文机构”，不能用会议名冒充机构。详情地址使用内部论文 ID；同一论文有多期记录时，接口返回最新期快照，而不是用户来源页面那一期，当前没有按期号指定详情的功能。
+
+#### 1.6.6 技术方向分类与历史内容聚合
+
+分类总览展示全部 15 个固定研究方向，每个方向有中英文名称与描述。进入某个方向后，浏览该方向下跨日期的 Focus 和 Watching，按时间和档位排序并分页。Candidate 默认不进入方向列表。
+
+这是一套固定分类导航，不是全文搜索、个性化推荐或用户自定义标签。方向列表以快照为单位，所以同一论文在多期出现时可能重复出现。
+
+#### 1.6.7 评分明细与筛选结果展示
+
+候选池页面分页显示所选日期全部评分论文的快照，每页 50 条，包括中英文标题、方向、总分、各加分项、最终档位及 Candidate 原因。Candidate 原因有低分归档、容量溢出、审核剔除三类。
+
+“审核剔除”也是当前代码对标题/模型/格式等处理失败的统一降级原因，不应理解成每一条都经过 Reviewer 明确否决。页面没有人工调分、人工发布、编辑摘要或删除记录功能。
+
+#### 1.6.8 邮件订阅、邮箱验证与日报分发
+
+用户在任意页面打开订阅弹窗，输入邮箱。未订阅、未验证或已退订邮箱收到验证邮件；只有点击有效验证链接后才进入活跃状态。已活跃邮箱再次提交时，收到订阅管理邮件，而不会创建重复用户。
+
+验证链接有效期为 24 小时，验证成功重定向到网站首页。邮件日报包含当期 Focus、Watching 的中英文标题、中文一句话总结、详情链接及退订链接，提供纯文本和 HTML 两种正文。网页语言选择不会同步成为邮件语言偏好。
+
+用户打开退订链接进入退订页，页面自动提交退订请求并显示结果。成功后停止接收日报；未来可重新提交邮箱并验证以恢复订阅。当前链接采用短期 token，过期后需要通过再次提交邮箱获取新的管理入口。
+
+#### 1.6.9 自动任务调度与运行维护
+
+仓库提供每天上海时间 08:00 生成简报、08:30 发送日报的 cron 安装脚本。两个任务独立触发，邮件任务会检查当期是否已经成功。如果生成耗时超过 08:30，邮件任务本次跳过；当前没有生成完成后自动追发的队列。
+
+维护者可按指定日期运行日更、连续补齐历史期号、修复中文标题、检查模型连通性与数据库结构。生产失败发送维护者告警；邮件部分发送失败时保留各收件人的状态，并继续尝试其他收件人。
+
+### 1.7 核心业务流程
+
+**日常阅读：** 打开首页 → 自动选最近有内容的期号 → 扫读 Focus → 打开感兴趣的详情 → 阅读亮点与应用场景 → 必要时打开原论文 → 回到首页继续浏览 Watching。
+
+**历史阅读：** 首页日历切换月份 → 选择日期 → 查看该期内容和数量 → 打开候选池查看筛选结果；或者进入分类总览 → 选择方向 → 分页浏览历史精选。
+
+**首次订阅：** 点击订阅 → 邮箱格式校验 → 提交 → 收到验证邮件 → 24 小时内点击链接 → 后端激活并跳转首页 → 后续日报任务发送邮件。
+
+**退订与恢复：** 打开邮件退订链接 → 页面自动请求退订 → 成功提示 → 停止后续日报；需要恢复时再次订阅并验证。
+
+**后台生产：** 调度任务确定期号 → 抓取与辅助信号补充 → 评分与方向分类 → 选题与初选论文机构补全 → 单篇 AI 处理及补位 → 保存快照与任务结果 → 独立邮件任务分发。
+
+### 1.8 产品功能范围与实现边界
+
+已实现的主要产品范围是公开阅读、历史日期导航、方向归档、评分透明化、双语解读、邮箱订阅和自动生产。仓库另外保留 RSS 接口，但没有正式前端入口，当前作为兼容接口说明，不扩展为新的主产品承诺。
+
+当前没有登录注册、个人主页、收藏、阅读历史、评论、点赞写入、站内全文搜索、个性化推荐、付费会员、后台 CMS、人工审核页面、论文问答、全文翻译或自动实验复现。没有网页配置定时任务、网页修改评分权重、按用户方向发送个性化邮件的功能。
+
+## 第二部分：前端设计与页面功能
+
+### 2.1 页面清单与信息架构
+
+前端共有 **6 个路由页面、1 个全站订阅弹窗、1 套移动端导航抽屉**。15 个方向共用一个方向页模板，不计算为 15 种页面。验证由后端接口执行，不是额外前端页面。
+
+| 页面 | 地址 | 目的 | 入口和去向 |
+| --- | --- | --- | --- |
+| 首页 | `/`，可带 `?date=YYYY-MM-DD` | 阅读一期简报与切换日期 | 全站品牌/首页导航；可去详情、候选池、分类 |
+| 论文详情 | `/paper/:id` | 阅读解读、查看作者和原文 | 首页、方向页、邮件；可去方向或外部论文 |
+| 候选池 | `/sources/:date`，可带 `?page=1` | 查看一期评分与分层结果 | 首页候选池按钮；可返回首页 |
+| 分类总览 | `/topics` | 选择研究方向 | 全站分类导航、首页方向入口；可去方向页 |
+| 方向聚合 | `/topic/:name`，可带 `?page=1` | 浏览一个方向的历史精选 | 分类卡片、方向标签；可去详情 |
+| 退订结果 | `/unsubscribe?token=...` | 执行退订并显示结果 | 邮件链接；可返回首页 |
+
+实现入口是 `frontend/src/router/index.js`。路由采用浏览器 History 模式，生产服务器必须将前端路径回退到 `index.html`，否则用户直接打开详情、方向或退订地址可能无法加载应用。当前没有额外的兜底 404 路由页面。
+
+### 2.2 全局视觉规范与响应式布局
+
+网站采用研究简报的阅读布局。背景为暖米色渐变，正文为深棕黑色，少量棕橙色强调按钮、标签和重点内容；面板有半透明浅色背景、细边框、圆角与柔和阴影。大标题使用衬线显示字体，正文和控件使用系统无衬线字体。
+
+| 视觉项 | 当前实现值或规则 | 使用位置 |
+| --- | --- | --- |
+| 页面底色 token | `#f4eee3`，另有页面渐变 | 页面背景 |
+| 强正文色 | `#221d17` | 大标题、重要数值 |
+| 正文色 / 次级色 | `#433a31` / `#77695c` | 描述、元信息 |
+| 强调色 / 深强调色 | `#c46f3c` / `#9b5429` | 导航交互、重点信号 |
+| 档位颜色 | Focus `#a94e27`、Watching `#6d6658`、Candidate `#8c7662` | 档位和分数视觉区分 |
+| 圆角 | 32 / 24 / 18 / 12 px | 面板、卡片、按钮、标签 |
+| 动效时间 | 160 / 260 / 420 ms | 按压、浮起、抽屉等过渡 |
+| 正文字体 | Avenir Next、Segoe UI、PingFang SC 等回退 | 阅读文本、控件 |
+| 标题字体 | Iowan Old Style、Palatino、Georgia 等回退 | 展示性标题 |
+| 最小页面宽度 | 320 px | 移动端基础布局 |
+
+具体样式由 `frontend/src/style.css` 与各 Vue 页面的 scoped CSS 共同定义。桌面可交互卡片有轻微上浮/缩放和阴影反馈；移动端主按钮采用稳定的深色高对比样式。CSS 提供减少动效偏好的适配，不能把桌面的悬停效果作为触屏操作的必要条件。
+
+首页在 1080 px 以下从主栏加侧栏调整为单列；720 px 以下进一步缩小内边距、调整卡片和按钮、让辅助栏以可折叠块呈现。其他页面依据各自媒体查询调整网格和文字，不能用一个断点概括全部页面。
+
+### 2.3 全局页面框架与公共交互
+
+**页头：** 左侧显示 ArxivDaily 品牌与“AI 研究简报 / AI Research Brief”；点击返回首页。桌面导航有首页、分类，当前栏目有激活样式。右侧提供中文/EN 切换与订阅日报按钮。
+
+**语言：** 默认中文，从 `localStorage.lang` 恢复选择，并通过 Vue `provide/inject` 向页面传递。切换后更新页面标题和界面文案，选用对应标题及解读字段；`router-view` 以语言为 key，因此切换语言会重新挂载页面并可能重新请求数据。原始摘要、arXiv 编号及技术枚举不强制翻译。
+
+**移动导航：** 保留简短订阅按钮和菜单按钮；菜单打开侧边抽屉，显示首页、分类、语言与订阅入口。支持关闭按钮、遮罩点击、Esc、路由变化关闭，打开时锁定 body 滚动并将焦点移入抽屉。抽屉内订阅按钮先关抽屉再打开订阅弹窗。
+
+**页脚：** 显示站点每日研究选题定位说明与版权信息；不是额外页面目录或管理入口。
+
+**请求反馈：** 数据页使用骨架屏或加载状态；通用 Axios 层处理请求失败并弹出错误提示。多数页面在失败后显示空列表或未找到状态，当前没有统一的错误重试面板。
+
+### 2.4 日报首页设计
+
+#### 页面目标与模块结构
+
+首页让新用户先理解站点，再理解当前日期和内容规模，最后进入论文阅读。页面依次包含顶部介绍区、当期统计、Focus 主阅读流、Watching 次级阅读流，以及日期日历、阅读说明、方向入口和近期简报等辅助内容。
+
+| 模块 | 展示内容 | 行为 |
+| --- | --- | --- |
+| 顶部介绍 | 站点定位、大标题、简介 | 提供进入分类和候选池等入口 |
+| 当期信息板 | 当前期号、Focus 数、Watching 数、Candidate 数 | 数值随日期请求结果更新 |
+| Focus 主卡片 | 档位、方向、总分、当前语言标题、一句话总结、按分值降序取前 3 项加分信号 | 标题/阅读入口打开详情；方向标签打开对应方向 |
+| Watching 列表 | 方向、分数、当前语言标题和简短总结 | 行点击打开详情；方向按钮独立导航 |
+| 日历 | 月份、周一到周日、日期、选中态、有无内容态 | 切月与选择日期 |
+| 近期简报 | 最近 4 个有内容日期及论文数 | 快速切换期号 |
+| 辅助阅读说明 | 内容分层与阅读引导 | 解释 Focus / Watching 阅读用途 |
+
+#### 数据加载与日期规则
+
+1. 先调用日历接口，得到最早/最晚日期、最近有内容日期和每天的数量。
+2. 默认日期优先级为地址中的 `date` → 最近有内容日期 → 最大日期。
+3. 默认日期必须处于后端提供的范围内。无可选日期时保留空状态；超出范围的地址参数当前不会自动纠正到最近一期。
+4. 默认日期写回 URL 使用 `router.replace`。用户选择日期同样替换查询参数，不为每一次日期选择添加一条历史记录。
+5. 列表请求固定使用 `page=1`、`limit=100`、目标期号、`include_candidates=true`。该请求最多取回前 100 条记录，不代表完整候选池。Focus/Watching 因档位优先排序且最多 17 条可在第一页获得；Candidate 总数由响应 total 减去这两类数量计算，完整评分记录通过候选池分页访问。
+6. 前端把数据拆成 Focus 和 Watching 并分别按总分降序显示；Candidate 不在主阅读流中展示。
+7. Candidate 统计优先由总记录数减去 Focus 和 Watching 数量得到。
+8. 快速切换日期使用递增请求编号，过期请求结果不会覆盖最新选择。
+
+#### 导航交互与页面状态
+
+首页详情、方向和分类入口采用新标签打开，候选池在当前标签页跳转。方向标签点击和论文阅读点击是不同操作。日历范围内无数据日期显示灰色但仍可选，选中后显示“该日期没有可展示内容”一类空态；范围外按钮禁用。
+
+初次读取日历失败时清空日期/内容状态；列表请求失败时清空该期列表，并由请求层提示错误。页面没有跨天滚动加载或首页论文分页器。
+
+### 2.5 论文详情页设计
+
+#### 页面内容结构
+
+1. **顶部元信息条：** Focus / Watching / Candidate、可点击方向、总分、存在时的未入选原因。
+2. **论文标题区：** 简报期号、当前语言标题和说明文案。
+3. **事实卡：** 作者、机构、arXiv 编号。
+4. **解读区：** 非 Candidate 显示一句话判断、核心亮点、应用场景。
+5. **Candidate 状态区：** 替代解读区，说明该论文没有进入最终解读结果。
+6. **来源区：** 默认展开的原始摘要、PDF 链接和 arXiv 链接，可通过原生折叠控件收起。
+
+#### 字段映射与展示规范
+
+作者最多直接显示前三位，多于三位时显示前三位加其余数量，通过 title 提示提供完整列表；无有效作者名显示 `--`。机构优先读取论文级 `affiliations`，没有有效值时回退 `authors[].affiliation`，去空、去重。最多三个直接用逗号分隔展示，超过三个时显示前三个和剩余数量，提示中以换行保留完整机构列表。英文机构名保留单词间空格，例如 `Fudan University`，不拼接为无空格名称。
+
+没有有效机构时显示“未识别到论文机构 / Institutions not identified”。会议字段虽然在 API 中存在，但不用于机构兜底。英文模式不翻译原始摘要，只切换结构化解读与界面标签。
+
+PDF 按钮在新标签打开来源地址，当前没有把 PDF 缓存在本站或保证浏览器强制下载。arXiv 按钮由 `arxiv_id` 拼接原文链接。方向标签在当前标签页进入方向页。
+
+#### 数据加载与异常处理
+
+监听路由 `id`，立即调用详情接口。加载时显示骨架，失败或没有数据时显示“未找到相关论文”。接口没有期号参数，所以历史卡片打开后可能显示同一论文更新一期的评分和解读。
+
+Candidate 的六个解读字段应为 null，页面不显示空白亮点模块。当前详情虽然拿到 `score_reasons`，但模板并没有展开逐项加分清单；逐项信号主要在首页 Focus 和候选池查看。旧页面中提到“保留评分原因”的说明不等于已经渲染出独立评分面板。
+
+### 2.6 候选池评分明细页设计
+
+页面顶部显示返回首页按钮、页面说明、目标期号、当前页条数和总条数。桌面左侧是阅读说明，右侧是评分表格式面板；窄屏将每条记录改为带字段标签的卡片布局。
+
+| 列 | 内容 | 说明 |
+| --- | --- | --- |
+| 评分 | 整数总分 | 按 ≥80、50–79、<50 使用不同样式，不支持点击排序 |
+| 论文 | 中文标题、英文原题、方向标签、档位标签 | 即使切换英文，当前模板仍同时显示两种标题 |
+| Signals | 所有已命中的评分项及 `+分值` | 缺失/未命中的项不显示零分占位 |
+| 分层 | 最终 category 和候选原因 | Focus / Watching 没有候选原因 |
+
+数据通过列表接口查询目标日期并开启 `include_candidates=true`；每页 50 条，URL `page` 保存页码。总条数来自后端完整计数，超过 50 条时通过分页查看后续记录；50 不是每日快照容量。排序继承 API 的期号、档位、分数顺序，页面不是把全部档位混合后按总分重排。
+
+请求过程中显示骨架；空列表显示该日期暂无候选池数据。当前标题和方向标签没有绑定详情跳转，也没有交互筛选器、搜索框、导出或后台操作。返回首页按钮指向 `/`，不会携带当前候选池日期。
+
+当前组件监听页码变化，但不独立监听 `:date` 参数变化；同组件复用时仅改变日期的导航不保证触发重新加载。这是现有实现限制。
+
+### 2.7 技术方向分类总览页设计
+
+顶部显示研究方向标题和说明，下方循环展示固定方向目录。卡片包含技术 key、当前语言的名称、方向简介及“进入分类”按钮。整张卡片支持鼠标点击、Enter 和空格，按钮阻止冒泡以避免重复触发。
+
+分类目录来自前端静态常量，不依赖论文列表接口，不显示实时论文数量；无论文的方向仍然显示入口。点击在新标签页打开方向页。桌面多列网格在窄屏减少列数。
+
+固定目录为：Agent、Reasoning、Training_Opt、RAG、Multimodal、Code_Intelligence、Vision_Image、Video、Safety_Alignment、Robotics、Audio、Interpretability、Benchmarking、Data_Engineering、Industry_Trends。第五部分给出每类含义及实际判定关键词。
+
+### 2.8 技术方向历史聚合页设计
+
+页面顶部显示方向名称和说明，读取静态目录的中英文信息。目录找不到时直接使用地址中的名称和通用说明，不跳到独立 404 页。
+
+正文每条显示 Focus/Watching 标签、期号、当前语言标题和一句话总结。标题在新标签打开详情；页面不显示完整核心亮点、应用场景或逐项评分。每页 20 条，超过 20 条才显示分页，页码写入 URL。
+
+接口使用 `direction=:name`，不开启 Candidate；默认按期号从新到旧、同一期 Focus 优先、再按分数从高到低排序。无结果或请求失败后显示“暂无该方向论文”。当前只监听页码变化，没有独立监听方向参数变化，与候选池页存在类似的同组件路由复用限制。
+
+### 2.9 全局邮件订阅弹窗设计
+
+弹窗由页头或移动抽屉打开，不占独立路由。内容包含标题、每天早上收到简报的说明、带邮件图标的邮箱输入框、取消及确认按钮。桌面声明宽度为 420 px，另由样式约束窄屏布局。
+
+邮箱必填，失焦或内容变化时检查格式。提交前再次校验；提交期间显示“提交中”，函数通过 `subscribing` 防止重复执行。成功后关闭弹窗、清空邮箱并显示前往邮箱确认的提示；失败时提交状态恢复，弹窗内容不会主动清空。
+
+当前前端只保留 API 的 `data`，订阅成功时显示固定“验证邮件已发送”提示。因此已活跃邮箱实际收到管理邮件时，前端提示没有准确区分。应把这个差异视为当前交互限制，不能据此描述后端始终发送验证邮件。
+
+### 2.10 邮箱验证重定向与退订结果页设计
+
+验证成功返回 `/?subscribe_success=1`。当前 `App.vue` 没有读取这个参数展示专门的成功横幅，因此用户看到普通首页，而不是独立验证成功页面。无效、过期验证链接由后端返回 JSON 错误，不会进入前端专门设计的失败页。
+
+退订页挂载时读取 `token`：缺失则直接显示失败；存在则立即调用退订 API，不要求再点一次确认。请求中显示旋转图标和处理中提示；成功显示停止接收说明及返回首页按钮；失败显示图标、错误信息和返回首页按钮。
+
+请求层对非 2xx 响应目前主要透传 Axios 的 `error.message`，所以退订页不一定展示后端精确的过期原因文案。全站切换语言会重新挂载该页，有 token 时可能再次提交；有效 token 的重复退订请求仍可成功，但仍计入接口限流。
+
+### 2.11 前端数据访问规范与页面验收标准
+
+正常运行通过 `VITE_API_BASE_URL` 请求后端；未配置时使用同源地址。只有 `VITE_USE_MOCK_BRIEF_DATA=true` 时才动态加载 mock provider，覆盖论文、日历、详情和订阅相关请求，用于无后端预览。Mock 预览不代表真实抓取、真实模型或真实邮件完成。
+
+验收时至少检查：首次打开首页的默认日期、历史日期刷新、范围内无数据日期、快速切日期、Focus/Watching 显示、详情论文级机构优先展示、作者单位回退与机构缺失、Candidate 隐藏解读、分类键盘进入、方向分页、移动抽屉关闭方式、语言持久化、订阅校验、缺 token 和过期 token 退订。仓库有对应页面测试，测试覆盖范围与现实外部链路应分开理解。
+
+## 第三部分：技术选型与系统架构
+
+### 3.1 系统总体架构
+
+系统采用前后端分离、后台批处理预生成内容的架构。浏览器只负责阅读和订阅操作；FastAPI 查询数据库与处理订阅；独立 Python 任务调用外部来源和模型，将生产结果写入同一个 MySQL 数据库。
+
+```text
+HF Daily Papers + arXiv
+        ↓ 统一元数据
+GitHub Trending + Semantic Scholar → 补充趋势和引用信号
+        ↓
+全部论文规则评分 → Focus / Watching 初选 → PDF 首页机构补全
+        ↓
+中文标题 → Editor → Writer → Reviewer → 失败重试 / 降级 / 补位
+        ↓
+MySQL：论文 + 期号快照 + AI trace + 任务日志
+        ├─ FastAPI 查询接口 → Vue 阅读网站
+        └─ 日报脚本 → SMTP → 活跃订阅者
+
+浏览器订阅 → FastAPI → subscriber + SMTP 验证邮件
+邮件验证链接 → FastAPI 激活 → 首页
+邮件退订链接 → Vue 退订页 → FastAPI 更新订阅状态
+```
+
+这里的 Editor / Writer / Reviewer 是同一服务中分阶段调用模型的角色，不是三个独立部署的应用服务，也不是读者可以操作的三名人工编辑。网页请求与生成任务解耦，模型调用耗时不会直接成为首页查询的必要步骤。
+
+### 3.2 前端技术栈与组件职责
+
+| 技术 | 仓库声明 | 职责 |
+| --- | --- | --- |
+| Vue | `^3.5.30` | 页面组件、响应式状态、组合式 API |
+| Vue Router | `^5.0.4` | 6 个页面、动态参数、日期/页码查询参数、History 导航 |
+| Element Plus | `^2.13.6` | 弹窗、邮箱表单、输入框、消息提示、骨架和分页 |
+| Element Plus Icons | `^2.3.2` | 菜单、关闭、邮件与结果图标 |
+| Axios | `^1.13.6` | 统一请求、10 秒超时、响应 data 解包和错误提示 |
+| Vite | `^8.0.1` | 本地开发服务器、生产静态构建 |
+| Vitest / Vue Test Utils / jsdom | `^4.1.4` / `^2.4.6` / `^29.0.2` | 组件测试与浏览器环境模拟 |
+| CSS 变量与 scoped CSS | 原生 CSS | 公共色彩字体、组件布局与响应式样式 |
+
+以上是 `frontend/package.json` 中的版本约束，不是本次核对时从网络查询的最新版本或线上安装版本。没有 Pinia、Redux 或独立 i18n 库；跨页语言状态由根组件提供，页面数据在各页维护，文案多以中英文条件表达式编写。
+
+生产构建输出 `frontend/dist`。前端不保存模型密钥、数据库凭据或 SMTP 密码；这些配置只属于后端运行环境。
+
+### 3.3 后端技术栈与组件职责
+
+| 技术 | 依赖约束 | 用途 |
+| --- | --- | --- |
+| Python | CI 使用 3.10 | API、抓取、模型处理、任务脚本 |
+| FastAPI | `>=0.116,<1.0` | HTTP 路由、参数绑定、异常响应 |
+| Uvicorn | `>=0.35,<1.0` | 运行 ASGI 服务 |
+| SQLAlchemy | `>=2.0,<3.0` | ORM 模型、查询、事务和会话 |
+| PyMySQL | `>=1.1,<2.0` | MySQL 驱动 |
+| cryptography | `>=44.0,<46.0` | 数据库等依赖的加密支持 |
+| Pydantic | `>=2.12,<3.0` | 请求和响应数据结构 |
+| pydantic-settings | `>=2.10,<3.0` | 环境变量与 `.env` 配置读取 |
+| email-validator | `>=2.2,<3.0` | 邮箱字段格式验证 |
+| requests | `>=2.32,<3.0` | 外部来源的同步 HTTP 抓取 |
+| pdfplumber / pypdf | `>=0.11,<1.0` / `>=6.0,<7.0` | PDF 首页文本提取及备用解析 |
+| OpenAI Python SDK | `>=1.68,<2.0` | 调用 OpenAI 兼容模型端点 |
+| Python 标准库 | 随 Python | XML、SMTP/MIME、UUID、时间、线程池、命令行参数 |
+
+当前不依赖 Redis、Celery、消息队列、向量数据库或搜索引擎。引用数量获取使用线程池，主论文 AI 流程逐篇处理。`services/filter.py` 等历史文件不能替代实际主链，当前选题与补位核心位于 `Pipeline`。
+
+### 3.4 模型选型与调用配置
+
+项目使用 **DeepSeek API**，代码默认端点为 `https://api.deepseek.com`，模型为 `deepseek-v4-flash`。本地环境文件中的端点与模型配置与此一致，部署 workflow 也采用相同配置。通过 OpenAI Python SDK 的兼容接口调用，不使用 SDK 名称作为模型供应商标识。
+
+密钥由 `DEEPSEEK_API_KEY` 提供，`Settings.LLM_API_KEY` 返回该值。当前配置类与调用代码统一采用 `LLM_*` 字段；旧 Kimi/MiniMax 密钥不再作为当前配置类的回退来源。进程环境和后端 `.env` 可以覆盖配置类默认值；生产实际生效值还取决于部署与进程重启，不以本地文件代替线上核验。
+
+| 参数 | `Settings` 默认值 | 含义 |
+| --- | --- | --- |
+| `DEEPSEEK_API_KEY` | 空，部署时配置 | 模型访问凭据，不记录密钥正文 |
+| `LLM_BASE_URL` | `https://api.deepseek.com` | 模型 API 端点 |
+| `LLM_MODEL` | `deepseek-v4-flash` | 模型标识 |
+| `LLM_THINKING_ENABLED` | false | DeepSeek 请求的思考模式开关 |
+| `LLM_TIMEOUT_SECONDS` | 60 | 普通模型请求超时秒数 |
+| `LLM_LONGFORM_TIMEOUT_SECONDS` | 180 | 长文本模型请求超时秒数 |
+| `LLM_MAX_RETRIES` | 3 | 普通请求总尝试次数，至少 1 次 |
+| `LLM_LONGFORM_MAX_RETRIES` | 2 | 长文本总尝试次数，不超过普通上限 |
+| `LLM_MIN_REQUEST_INTERVAL_SECONDS` | 1.0 | 普通请求最小间隔秒数 |
+| `LLM_LONGFORM_MIN_REQUEST_INTERVAL_SECONDS` | 2.0 | 长文本请求最小间隔秒数 |
+| `LLM_EDITOR_MAX_TOKENS` | 4096 | Editor 输出预算 |
+| `LLM_WRITER_FOCUS_MAX_TOKENS` | 4096 | Focus Writer 输出预算 |
+| `LLM_WRITER_WATCHING_MAX_TOKENS` | 4096 | Watching Writer 输出预算 |
+| `LLM_REVIEWER_MAX_TOKENS` | 2048 | Reviewer 输出预算 |
+| `LLM_ABSTRACT_MAX_CHARS` | 16000 | 传给角色链的摘要字符数上限；≤0 时不截断 |
+| `LLM_TITLE_LOCALIZATION_ATTEMPTS` | 3 | 标题翻译结构校验尝试次数 |
+| `LLM_TITLE_BATCH_SIZE` | 8 | 标题批量补译大小 |
+| `LLM_USAGE_LOG_PATH` | 空 | 可选 JSONL 模型用量日志路径；为空时不记录 |
+
+模型名以 `deepseek-` 开头时，请求通过 `extra_body.thinking.type` 设置 `enabled` 或 `disabled`；默认 disabled。角色调用还根据论文数量设置最低 token 预算：Editor 每篇至少 1200，Focus Writer 每篇至少 1800，Watching Writer 每篇至少 1200，Reviewer 至少 256。标题翻译和机构识别使用 JSON，Editor/Writer/Reviewer 使用结构化 Markdown。
+
+`_should_stream` 当前固定为 false，实际采用非流式 Chat Completions。SDK 客户端按超时复用，SDK 内建重试为 0，由应用统一处理重试和请求间隔；限速属于处理器实例内控制，不是跨进程共享额度管理。
+
+认证或权限错误在请求层立即抛出；限流、超时、连接错误、API 错误和空文本按相应路径重试。限流退避普通请求以 8 秒、长请求以 20 秒乘轮次，分别封顶 30/90 秒；其他退避普通以 12 秒、长请求以 45 秒乘轮次，分别封顶 45/120 秒。外层阶段仍可能再次尝试，单次请求失败不等于整期任务立即失败。
+
+部署 workflow 从 Secret 读取 `DEEPSEEK_API_KEY`，直接写入上述模型、思考开关、超时、请求次数、请求间隔、角色输出预算、摘要上限和标题参数。`LLM_USAGE_LOG_PATH` 当前未出现在生产模板中，需单独配置后才能启用用量记录。环境文件、类默认值和部署模板虽采用同一命名，仍需区分配置来源，避免手工覆盖与部署覆盖混淆。
+
+### 3.5 运行环境配置规范
+
+| 配置组 | 参数 | 用途与边界 |
+| --- | --- | --- |
+| 模型服务 | `DEEPSEEK_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL` | DeepSeek 服务配置；端点、模型、密钥读取规则见 3.4 节 |
+| 数据库 | `DATABASE_URL`、`MYSQL_UNIX_SOCKET` | 默认 MySQL+PyMySQL；可选 Unix socket |
+| 对外地址 | `BACKEND_PUBLIC_URL`、`FRONTEND_URL` | 分别构造验证链接与前端详情/退订链接 |
+| 外部论文源 | `HUGGINGFACE_API_URL` | HF Daily 接口地址；arXiv 类别和地址在 Crawler 中定义 |
+| 引用信号 | `SEMANTIC_SCHOLAR_TIMEOUT_SECONDS=5`、`CRAWLER_CITATION_MAX_WORKERS=16` | 单次超时与线程数 |
+| 机构补全 | `AFFILIATION_ENRICH_ENABLED=true` | 初选 Focus/Watching 的 PDF 首页机构补全开关 |
+| 机构提取请求 | `AFFILIATION_ENRICH_TIMEOUT_SECONDS=30`、`AFFILIATION_ENRICH_MAX_RETRIES=5` | PDF 下载超时；机构提取最多 5 次 |
+| 首页文本校验 | `AFFILIATION_ENRICH_PAGE_TEXT_MIN_CHARS=200` | 机构提取所需最少首页文本字符数 |
+| 抓取回退 | `PIPELINE_FETCH_BACKTRACK_DAYS=3` | 基准日期为空时额外向前尝试的天数 |
+| 手工探测 | `PIPELINE_PROBE_DAYS=14` | 单次探测脚本的查找范围，不是日常抓取回退天数 |
+| 档位开关 | `PIPELINE_ENABLE_WATCHING=true` | 是否处理 Watching |
+| 审核开关 | `PIPELINE_REVIEWER_STRICT=true` | 是否将 Reviewer 拒绝/失败作为发布阻断 |
+| 分类处理预算 | `PIPELINE_MAX_CATEGORY_ATTEMPTS=30` | 每个档位最多尝试的论文数上限 |
+| Focus / Watching 倍率 | `4` / `2` | 按目标篇数计算可尝试的论文数量 |
+| 完整 AI 再入队 | `PIPELINE_REVIEW_REQUEUE_ATTEMPTS=5` | 审核拒绝后完整角色链重跑的总轮数 |
+| SMTP | `SMTP_HOST`、`SMTP_PORT`、`SMTP_USERNAME`、`SMTP_PASSWORD` | 邮件服务器和凭据；端口默认 587 |
+| 发件人 | `SMTP_FROM_EMAIL`、`SMTP_FROM_NAME` | 发件地址和显示名称 |
+| SMTP 传输 | `SMTP_USE_STARTTLS=true`、`SMTP_USE_SSL=false` | STARTTLS / SSL 连接设置 |
+| 告警 | `OWNER_ALERT_EMAIL` | 维护者收件地址，通过环境配置 |
+| 前端 | `VITE_API_BASE_URL`、`VITE_USE_MOCK_BRIEF_DATA` | API 基址与显式 mock 开关 |
+
+`Settings` 从后端工作目录的 `.env` 读取配置，忽略额外字段。生产不能仅因为类中有默认值就认定数据库、模型或邮件已经配置可用；日更与部署脚本另做必要配置检查。
+
+### 3.6 部署架构与服务职责
+
+当前仓库提供 Ubuntu 单机部署资产：MySQL 提供持久化；Uvicorn 在 `127.0.0.1:8000` 运行 API；Nginx 托管 `frontend/dist` 并代理 `/api/`；systemd 托管后端进程；cron 触发更新和发报脚本。部署资产中站点域名使用 `arxivdaily.tech`，仓库目录使用 `/srv/ai-paper-summary`。
+
+FastAPI 进程启动本身不会自动安排日更。调度由 cron 安装步骤配置，API 服务重启与后台批处理是两件事。数据库和外部服务不可用时，静态网页壳仍可能打开，但不代表有内容或订阅可成功。
+
+### 3.7 源码目录结构与模块职责
+
+| 路径 | 职责 |
+| --- | --- |
+| `frontend/src/App.vue` | 页头、页脚、全站语言、移动抽屉、订阅弹窗 |
+| `frontend/src/views/` | 6 个业务页面 |
+| `frontend/src/constants/topics.js` | 前端方向名称和描述 |
+| `frontend/src/api/papers.js` | 业务请求与 mock 分流 |
+| `frontend/src/utils/request.js` | Axios 基址、超时和错误处理 |
+| `backend/app/main.py` | FastAPI 应用、CORS、统一异常处理 |
+| `backend/app/api/v1/` | 论文、日历、订阅、退订、RSS 接口 |
+| `backend/app/services/crawler.py` | 来源抓取、标准化、合并、信号补充 |
+| `backend/app/services/scorer.py` | 8 信号累计评分和方向判定 |
+| `backend/app/services/affiliation_enricher.py` | PDF 首页机构提取、来源证据校验和规范化 |
+| `backend/app/services/pipeline.py` | 当期选题、AI 处理、降级补位和持久化 |
+| `backend/app/services/ai_processor.py` | 模型客户端、标题翻译、角色调用、输出解析和修复 |
+| `backend/app/services/issue_pipeline_runner.py` | 日更与历史回填共享执行及失败清理重试 |
+| `backend/app/services/notification_service.py` | 邮件链接、正文、投递幂等和日志 |
+| `backend/app/services/mailer.py` | SMTP 发信实现 |
+| `backend/prompts/` | 三个角色的提示词文件 |
+| `backend/app/core/specs.py` | 阈值、容量、枚举、机构和方向关键词 |
+| `backend/app/core/config.py` | 环境配置 |
+| `backend/app/models/domain.py` | 6 张业务表的 ORM 定义 |
+| `backend/app/schemas/paper.py` | API 请求响应模型 |
+| `backend/scripts/` | 初始化、日更、回填、发报、cron 和连通性检查 |
+| `database/` | 建表 SQL 与迁移脚本 |
+| `deploy/linux/` | Nginx、systemd、生产环境模板和部署说明 |
+| `tests/`、`.github/workflows/` | 自动化验证和部署工作流 |
+
+## 第四部分：完整 Pipeline 执行流程
+
+### 4.1 流程目标与执行范围
+
+Pipeline 负责将指定期号的外部论文数据转化为可供网站展示的结构化简报。其处理单位为一期 `issue_date`，输入为期号、运行配置和外部来源数据，输出为论文元数据、期号快照、正式双语解读、AI 阶段记录及任务结果。
+
+完整业务链包含任务触发、生产预检、内容采集、评分分类、初始选题、机构补全、快照初始化、单篇 AI 处理、候选补位、标题补译、事务提交，以及提交后的网页读取和独立邮件分发。内容生产在 `Pipeline.run` 成功提交后结束；网页访问和邮件发送使用其产物，不在该函数中执行。
+
+| 执行层 | 核心入口 | 职责 |
+| --- | --- | --- |
+| 调度与脚本层 | cron、日更脚本、历史回填脚本、单次运行脚本 | 确定期号、检查运行条件、调用生产入口并处理最终结果 |
+| 期号恢复层 | `run_issue_pipeline` | 创建数据库会话，执行一期；异常时按配置清理并重试 |
+| 内容编排层 | `Pipeline.run` | 控制采集、选择、AI 处理和持久化的顺序 |
+| 单篇生成层 | `_process_category_batch`、`_run_ai_batch` | 控制档位队列、单篇生成、审核重试、降级和补位 |
+| 内容分发层 | 查询 API、`send_daily_digest` | 读取已保存内容，提供网页访问和邮件发送 |
+
+### 4.2 全流程执行顺序
+
+```text
+任务触发：日更 / 指定日期运行 / 历史回填
+    ↓
+运行预检与期号确定
+    ↓
+共享执行入口 run_issue_pipeline
+    ↓
+创建或更新任务状态为 RUNNING，提交任务记录
+    ↓
+计算抓取基准日：issue_date - 3 天
+    ↓
+抓取 HF + arXiv → 合并去重 → 补充 Trending 与引用信号
+    ├─ 结果为空：向前回退日期，直至达到上限
+    └─ 最终无数据：进入整期异常处理
+    ↓
+全部论文评分、方向分类、总分排序
+    ↓
+Focus / Watching 初选与补位队列建立
+    ↓
+初选论文 PDF 首页机构补全（失败不阻断）
+    ↓
+全部论文设置标题占位 → upsert paper
+    ↓
+重建当期 paper_summary，写入评分与初选状态
+    ↓
+先处理 Focus，后处理 Watching
+    └─ 逐篇：标题本地化 → Editor → Writer → Reviewer
+          ├─ 通过：写入双语解读，计入成功数量
+          ├─ 格式异常：修复 / 阶段重试
+          ├─ 审核拒绝：Writer 重写 / 完整角色链重跑
+          └─ 最终失败：降为 Candidate，继续候选补位
+    ↓
+检查实际成功处理数量
+    ├─ 0 篇：进入整期异常处理
+    └─ 至少 1 篇：批量补译当期仍待翻译的标题
+    ↓
+写入 SUCCESS、计数与完成时间，提交内容事务
+    ├─ 网页 API 可读取最新已提交内容
+    └─ 独立日报任务检查成功期号后向活跃订阅者发信
+
+整期异常处理：
+回滚未提交内容 → 写入 FAILED 与错误日志 → 抛出异常
+    ↓
+共享入口尚有恢复次数：清理当期 trace / summary / task → 重新执行
+共享入口次数耗尽：向脚本抛出 → 日更告警或历史回填记录失败并继续
+```
+
+### 4.3 阶段一：任务触发与运行预检
+
+**日常生产。** cron 默认在上海时间 08:00 执行 `run_daily_update_job.py`。脚本未指定日期时按上海当天确定期号，指定 `--issue-date` 时使用传入日期。先检查三个角色提示词是否存在，再检查或初始化数据库、校验模型密钥与模型配置，最后进入共享生产入口。
+
+**历史回填。** `backfill_issue_range.py` 接收起止日期闭区间，先检查运行条件，再逐期执行。已有 SUCCESS 的期号在调用 Pipeline 前跳过；一日期号失败不会阻断后续日期。模型连通性预检可通过 `--skip-llm-check` 跳过，实际生产仍调用模型。
+
+**手工单次运行。** `run_pipeline_once.py` 检查数据库、配置与模型连通性，并探测可用期号；通过 `PIPELINE_FIXED_ISSUE_DATE` 可直接指定期号。探测结果只决定执行日期，真正的内容生产仍由共享入口完成。
+
+**阶段输出。** 确定的 `issue_date` 和可用于执行的运行环境。预检在 Pipeline 创建任务记录之前失败时，可能没有该期 system_task_log；日更脚本仍会尝试发维护者告警。
+
+### 4.4 阶段二：期号任务初始化
+
+共享入口创建数据库会话，构造 Pipeline 及其 Crawler、Scorer、AIProcessor、AffiliationEnricher。`Pipeline.run` 解析期号，调用 `_start_task` 查询当期任务。
+
+无任务记录时新增 RUNNING；已有非 SUCCESS 记录时改为 RUNNING，清除错误和完成时间，刷新开始时间。随后立即提交任务记录，使长时间抓取或模型运行期间可以查询任务已启动状态。
+
+Pipeline 自身会拒绝 SUCCESS 期号重新执行，但共享入口的通用异常恢复可能清理该期后重跑；这不是对所有入口都成立的成功期保护。RUNNING 也不是互斥锁，当前没有保证同一期只能由一个进程执行的跨进程锁。具体恢复规则见 4.15 节。
+
+### 4.5 阶段三：论文采集与来源信号补充
+
+输入为期号减 3 天得到的抓取基准日。每个尝试日期依次执行 HF Daily 和 arXiv 采集，将相同 `arxiv_id` 的结果合并，再获取 GitHub Trending 与 Semantic Scholar 引用信息。
+
+HF 提供当日推荐和点赞数据；arXiv 按六个分类读取最新记录并筛选目标发表日期。合并时择优保留标题、摘要、作者、venue、PDF 地址等字段，保留 HF 推荐标志和较高点赞数。辅助请求分别生成 `is_trending` 与 `citations`；失败时降级为无趋势或零引用。
+
+当前日期合并后无结果时，按天向前回退，默认最多额外 3 天。找到第一组非空结果即停止，不合并多个日期。全部尝试为空时抛出整期异常。实际采用的抓取日期发生回退时写运行日志，期号本身不变。
+
+阶段输出为统一论文列表，`fetched_count` 记录该列表的长度。列表仍未执行评分和选题，也尚未持久化到论文快照。
+
+### 4.6 阶段四：全量评分与方向分类
+
+每篇论文通过 Scorer 计算八类信号分数和 `score_reasons`，再根据固定优先级关键词确定一个 direction，并生成仅供中间判断的 `threshold_category`。全部结果按总分降序排列。
+
+本阶段处理所有合并后的论文，没有前 50 篇截断。评分结果将用于选题、补位及候选池保存。最终 Focus/Watching/Candidate 不直接采用 threshold_category，而由后续选择和处理结果决定。
+
+机构提取尚未执行，评分只能使用此时输入中已有的论文级机构及作者单位。后续从 PDF 新提取的机构不会自动追溯修改本期分数。
+
+### 4.7 阶段五：档位初选与队列初始化
+
+| 队列或集合 | 构造规则 | 用途 |
+| --- | --- | --- |
+| 初始 Focus | 先取 ≥80 分的前 5；不足时从剩余总排名补齐 | 确定重点解读初始目标，最多 5 篇 |
+| Focus 补位队列 | 所有未进入初始 Focus 的论文，保持评分顺序 | 替代失败或被拒绝的重点论文 |
+| 初始 Watching | 排除初始 Focus 后，从 50≤score<80 中取前 12 | 确定次级解读初始目标，最多 12 篇 |
+| Watching 补位队列 | Watching 范围内未进入其初选的剩余论文 | 补充 Watching 失败项 |
+| 全期已尝试集合 | 初始为空，各档位共同维护 | 防止一篇论文在两个档位重复进入主 AI 生成 |
+
+Watching 关闭时清空其初选和补位队列，仅生产 Focus。每个档位的目标数取初选数量，因此外部供给不足时不会设置无法达到的固定满额目标。
+
+本阶段的选择只是处理计划。初选论文仍需经过机构补全、标题处理和主 AI 生成，不能在此时视为已完成正式解读。
+
+### 4.8 阶段六：初选论文机构补全
+
+开启机构补全时，顺序遍历初始 Focus 和 Watching，下载 PDF、提取第一页文本、截取前置信息，调用模型生成带机构判断的 JSON，再进行名称规范化、去重、标题片段排除和来源证据校验。
+
+只有非空机构列表且无拒绝原因时，将 `affiliations` 写入该论文的内存元数据，准备后续保存。没有地址、下载失败、文字不足、结构错误或证据不足时保留失败/跳过结果，继续处理下一篇，不阻断当期生产。
+
+临时 PDF 提取后删除。提取最多尝试 5 次，底层模型请求另有重试。具体机构数量、状态、尝试次数和原因写入运行进度；机构结果不作为 Editor/Writer/Reviewer trace 保存。
+
+本阶段不处理全部 Candidate，也不会在后续动态补位时自动再次执行。它补充的是论文级机构列表，不修改作者顺序，也不建立逐作者机构关系。
+
+### 4.9 阶段七：论文元数据与期号快照初始化
+
+1. 为全部评分论文设置可保存的中文标题占位；需要翻译的英文标题使用“待翻译：原题”。
+2. 按 `arxiv_id` 查询 paper，存在则更新元数据，不存在则新增，并获取内部 `paper.id`。
+3. 元数据中存在新的 affiliations 字段时更新论文级机构；没有新的机构结果时不主动清空已有机构。
+4. 删除并重建目标期号的 paper_summary。为每篇评分论文写入 paper_id、issue_date、score、score_reasons、direction 和初选 category。
+5. 初选 Focus/Watching 的 candidate_reason 为空；未入选记录根据分数写 low_score 或 capacity_overflow。正式解读在后续生成成功后写入。
+6. 保存内存论文对象到 ORM paper 和 summary 的关联，供逐篇处理直接更新。
+
+本阶段的多次 flush 用于取得主键并检查数据库写入，不等于正式发布提交。除已提交的 RUNNING 任务外，论文、快照和后续 trace 仍属于尚未完成的内容事务。
+
+### 4.10 阶段八：单篇标题与三角色生成
+
+每档按“初选队列 + 补位队列”顺序取论文。跳过全期已尝试项、该档位已接受或已拒绝项；Watching 还跳过已被提升为 Focus 的论文。实际开始处理时加入全期已尝试集合，并累计该档位尝试次数。
+
+| 步骤 | 输入 | 执行动作 | 成功输出 |
+| --- | --- | --- | --- |
+| 中文标题本地化 | 论文 ID、英文标题 | 请求 JSON 中文标题，检查中文字符、非空和 ID 覆盖；耗尽时回退占位 | 更新内存与 paper.title_zh |
+| Editor | 论文元数据、分数、方向、摘要；重跑时加反馈 | 提炼写作角度、核心痛点与具体解法，校验字段和 ID | 逐篇定调文本与 generated trace |
+| Writer | Editor 定调、原始元数据、档位及重写历史 | 生成六个双语字段，检查非空、ID 与亮点数量 | 可解析解读与 generated trace |
+| Reviewer | Writer 输出 | 返回 PASSED/REJECTED 和拒绝 ID；程序检查两行结构和 ID 来源 | 审核结论及 accepted/rejected trace |
+| 结果应用 | 通过的结构化解读 | 设置最终档位，清空候选原因，写入六个解读字段 | 本档位成功数加一 |
+
+主链按单篇隔离调用，虽然部分方法名保留 batch，通常传入的是单元素列表。Editor 和 Writer 使用归一化且按配置截断的摘要，默认上限 16000 字符；Reviewer 不额外接收论文全文，不能将该步骤等同于全文事实核验。
+
+Focus 亮点为每种语言 3–5 条，Watching 为 1–2 条，中英文数量必须相同。标题翻译的占位回退不会单独保证中文标题已经成功；解读能否接受仍按后续流程判断。
+
+### 4.11 阶段九：结构修复与审核重试
+
+单篇生成不是单次模型请求，内部按以下顺序处理异常：
+
+1. 请求层先处理限流、连接、超时、API 错误或空结果，按配置重试并退避；权限错误在该请求层立即抛出。
+2. Editor 输出结构不合法时记录 invalid 原文并尝试专用格式修复；修复失败可重新生成，单轮最多 3 次阶段尝试。
+3. Writer 输出结构不合法时同样记录、修复，失败反馈进入后续 Writer 重写历史。
+4. Reviewer 拒绝时，在本轮 Writer/审核循环内重新生成完整单篇输出，循环最多 3 次。Reviewer 格式异常可通过专用修复路径再次解析。
+5. 单轮结束仍有被拒绝论文时，外层完整角色链将审核反馈带回 Editor，重新执行 Editor → Writer → Reviewer，默认总共最多 5 轮。
+6. 完整审核轮次耗尽后仍拒绝时，发送尽力而为的维护者告警并向分类处理层返回拒绝结果。
+
+完整重跑适用于单轮返回审核拒绝的路径；某些未恢复的异常会直接向分类层抛出，不保证每种错误都消耗全部 5 轮。默认严格模式以拒绝为发布阻断；非严格模式可接受已经通过结构校验的 Writer 输出，即使 Reviewer 拒绝或失败。
+
+trace 以快照、阶段、编码后的 attempt_no 区分重试记录，格式修复前的 invalid 文本与修复后的有效文本分别保存。具体编号和字段契约由第六部分定义。
+
+### 4.12 阶段十：失败降级、候选补位与档位终止
+
+单篇最终失败、审核拒绝或没有解析结果时，将对应 summary 改为 Candidate，candidate_reason 统一为 reviewer_rejected，并清空六个正式解读字段。分类层继续取下一篇候选，因此一篇失败不会立即结束整期。
+
+每个档位在达到初始目标、队列耗尽或尝试预算用完时结束。预算按 `min(队列长度, 配置上限, max(目标数, 目标数×倍率))` 计算，默认 Focus 倍率 4、Watching 倍率 2、配置上限 30。目标为 5/12 且队列充足时，分别最多尝试 20/24 篇；每篇内部仍可能有多轮模型调用。
+
+Focus 先运行，它的补位可能消耗 Watching 初选论文。Watching 后运行时会跳过这些论文，也跳过已经失败并加入全期已尝试集合的论文，不会重复处理以凑满数量。最终篇数可以少于 5 和 12。
+
+当前实现没有在档位结束后统一扫描所有初选行的解读完整性，特殊的预算耗尽或跨档位跳过路径可能留下初选档位但解读为空的记录。后续成功条件使用实际 processed_count，而不是对非 Candidate 行逐项做最终完整性检查。
+
+### 4.13 阶段十一：标题补译与成功提交
+
+Focus 和 Watching 处理结束后，将实际成功应用解读的数量累加为 processed_count。若为 0，立即进入整期失败；至少有 1 篇则继续最终标题补译。
+
+标题补译查询当期仍以“待翻译：”开头的论文，按 `LLM_TITLE_BATCH_SIZE`（默认 8）批量处理。查询并不只针对最终 Focus/Watching，也包括同一期 Candidate。只对有效且不同于原题的结果更新 paper.title_zh，其余保留占位。标题补译有批次进度日志。
+
+最终将任务更新为 SUCCESS，写入 fetched_count、processed_count、finished_at，清空 error_log，并执行一次内容事务提交。数据库提交成功后，共享入口读取任务并返回期号、状态、抓取数、处理数和完成时间。
+
+SUCCESS 表示本次生产成功完成且至少有一篇实际生成结果，不意味着全部候选都已译成中文、每天达到 17 篇、所有来源请求均成功或邮件已发送。
+
+### 4.14 阶段十二：网页读取与邮件分发
+
+**网页读取。** API 查询已提交的 paper 与 paper_summary；首页读取一期的精选与统计，候选池每页 50 条展示全部评分记录，方向页聚合跨期精选，详情取论文最新快照。网页查询不重新运行 Crawler 或 AI。查询 API 当前未额外要求任务状态 SUCCESS，正式主链通常依赖事务提交形成可见内容。
+
+**邮件分发。** cron 默认于上海时间 08:30 独立运行 `send_daily_digest.py`。脚本检查目标期号是否 SUCCESS、有无非 Candidate 内容和活跃订阅者；条件不足直接跳过，不阻塞等待日更。
+
+对每个活跃订阅者，先检查“通知类型 + 实际发送日期 + 邮箱”是否已有 sent，未发送者刷新退订 token、构造正文、调用 SMTP，再记录发送结果。单个收件人失败继续后续收件人，最终有失败则尝试告警并抛出汇总异常。
+
+邮件发送不属于内容事务。网页内容可以已经成功发布而邮件尚未发送或发送失败；生成在 08:30 之后才完成时，也没有自动追发机制。历史回填同样不自动触发逐期邮件发送。
+
+### 4.15 整期失败恢复与事务边界
+
+| 失败位置 | 内容处理 | 任务及恢复结果 |
+| --- | --- | --- |
+| 脚本预检 | 尚未进入内容生产 | 日更告警；可能没有当期任务记录 |
+| 机构补全 | 保留已有机构，继续生成 | 不单独标记整期失败 |
+| 单篇 AI | 清空该篇解读并降级，继续补位 | 是否整期成功由后续累计结果决定 |
+| 整期抓取为空、成功数为零或内容事务异常 | 回滚尚未提交的论文、快照和 trace | 写 FAILED、计数、错误堆栈和完成时间，提交后抛出 |
+| 共享入口第一次异常 | 清理该期 trace、summary、task；保留共享 paper 和投递记录 | 默认再执行一次完整 Pipeline |
+| 共享入口第二次异常 | 不再自动清理重跑 | 向脚本抛出；日更尝试告警，范围回填记录该日失败并继续 |
+| 邮件分发失败 | 不回滚已发布论文 | 写独立发送日志，可后续重试未成功收件人 |
+
+`cleanup_on_failure=false` 时共享入口只尝试一次。默认恢复捕获任意异常，并非只捕获网络暂态错误；已成功期号的拒绝异常也可能触发清理，这一点必须与调用前跳过 SUCCESS 的历史回填入口区分。
+
+失败恢复会清理部分期号过程记录，内容回滚也会撤销未提交 trace，因此不能将数据库阶段记录视为永久保留的完整执行历史。任务唯一键用于防止重复期号行，不提供同一期的并发锁。
+
+### 4.16 阶段产物与验证标准
+
+| 产物 | 生成阶段 | 保存位置 | 验证内容 |
+| --- | --- | --- | --- |
+| 合并论文元数据 | 采集、机构补全、标题处理 | paper | ID、标题、作者、机构、摘要、日期、原文地址 |
+| 每期评分与分层 | 评分、初选、AI 结果应用 | paper_summary | 全量评分记录、唯一论文期号、分值、方向、档位及候选原因 |
+| 正式双语解读 | Writer 与审核结果应用 | paper_summary 六个字段 | 非空、亮点条数、语言对应、ID 一致 |
+| 角色阶段产物 | Editor / Writer / Reviewer 及修复 | paper_ai_trace | 阶段、状态、尝试编号、文本和快照关联 |
+| 期号执行结果 | 初始化、成功提交或失败处理 | system_task_log | 状态、抓取数、实际成功数、时间和异常 |
+| 实时执行进度 | 机构、角色、补标题阶段 | 进程输出及 cron 日志 | 当前论文、阶段、尝试编号、批次与错误摘要 |
+| 模型数值用量 | 带 usage 的有效非流式响应 | 可选 LLM_USAGE_LOG_PATH JSONL | 输入、输出、缓存和推理 token，不代表最终账单 |
+| 日报投递结果 | 独立邮件脚本 | notification_delivery_log | 去重键、收件人、状态、期号和发送错误 |
+
+流程验收应同时覆盖正常生产、空来源回退、单篇失败补位、审核拒绝重跑、机构提取失败、零成功整期失败、事务恢复以及邮件跳过/部分失败。确认的对象应是每阶段实际输入输出和持久化结果，不能仅依据命令退出成功或某一条进度日志判断整条链路完成。
+
+## 第五部分：后端实现、业务规则与运行逻辑
+
+### 5.1 时间与标识规则
+
+系统使用三个不同日期：`arxiv_publish_date` 表示来源记录的发表日期；`issue_date` 表示简报期号；`run_date` 表示实际执行邮件发送的上海日期。历史补发时 `issue_date` 可以早于 `run_date`，两者不能互换。
+
+默认期号按上海时区计算。`fetch_anchor_date = issue_date - 3 天`；回退采用 0 到配置上限的闭区间，默认总共尝试 4 个日期，取第一组非空结果，不会把四天结果合并进同一期。原始发表日期不参与强制重写期号。
+
+论文的外部标识为 `arxiv_id`，数据库内部主键为 `paper.id`，某一期的记录主键为 `paper_summary.id`。URL 的 `/paper/:id` 使用第二种，AI 文本使用第一种，AI trace 外键使用第三种。当前抓取合并以原样字符串为准，没有统一去掉 arXiv 版本后缀，因此带版本与不带版本的 ID 可能未被合并。
+
+### 5.2 论文采集流程与数据标准化
+
+#### Hugging Face Daily Papers 数据采集
+
+请求 HF Daily 接口并附带 `date=fetch_date`，超时 30 秒。逐条读取 `paper.id`、标题、summary、authors、venue/conference、PDF 地址与点赞数。没有论文 ID 的条目跳过，作者没有姓名的条目不进入作者列表。
+
+来源的 `publishedAt` 优先使用条目字段，其次论文字段；不能解析为带时间的日期时使用抓取日期。标题和摘要中的换行与多余空白会折叠。默认标记 `is_hf_daily=true`，供评分使用。
+
+#### arXiv 数据采集
+
+依次请求 `cs.AI`、`cs.CL`、`cs.LG`、`cs.CV`、`cs.MA`、`cs.IR`。每个分类读取最新 300 条，按 submittedDate 倒序，单次超时 30 秒，再从返回 Atom XML 中筛选 `published` 日期等于目标日期的条目。
+
+解析英文标题、原始摘要、作者和 affiliation、journal-ref、论文 ID，构造 PDF 地址。单个分类失败则继续其他分类。**当前不是按目标日期进行服务端范围查询，也没有翻页抓取全部历史记录**，所以较老日期可能不在最新 300 条中；历史回填存在明确的覆盖限制。
+
+#### 多源论文数据合并规则
+
+先用 arXiv 列表建立以 ID 为 key 的映射，再加入 HF：相同 ID 合并，不同 ID新增。合并时：
+
+- 标题、摘要、venue 优先非空，再选更长文本；不是固定某个来源永远优先。
+- 作者列表按非空单位数量、有效姓名数量、总文本长度比较，选择更丰富的完整列表，而不是逐个作者拼接。
+- PDF 优先标准 arXiv PDF URL，其次比较已有链接。
+- upvotes 取最大值；HF 标志采用逻辑或。
+- 发表日期优先原 arXiv 字段，其次 HF 字段。
+
+#### 辅助评分信号采集
+
+GitHub Trending 请求日榜页面，超时 15 秒，通过 HTML 链接模式提取仓库。再从论文标题与摘要中提取 `github.com/owner/repo`，不区分大小写匹配日榜仓库。有匹配则 `is_trending=true`。这没有读取 GitHub star 数，也没有检查仓库代码是否真的可运行。
+
+Semantic Scholar 按 `ARXIV:{id}` 请求 `citationCount`，默认 5 秒超时、16 个线程并发。失败或缺失按 0 处理。引用数只用于当次打分，数据库不保留原始 citationCount。
+
+这些辅助信号反映任务执行时的外部状态。回填旧期号时取得的是当前可获取的引用/趋势信号，不能称为精确还原历史当天的热度。
+
+#### 论文机构提取与补全
+
+机构补全由 `AffiliationEnricher` 执行，目标是取得论文级机构列表，不建立作者与机构的一一映射。日常流水线在评分和初选完成后、写入论文元数据之前处理初选 Focus/Watching；`AFFILIATION_ENRICH_ENABLED=false` 时跳过。关闭 Watching 后也不补全该档位。后续 AI 补位论文不会自动重新进入机构补全步骤。
+
+处理顺序如下：
+
+1. 检查 PDF 地址。缺少地址返回 `skipped_no_pdf_url`；下载异常返回 `download_failed`。
+2. 以默认 30 秒超时下载 PDF，检查响应类型或 `%PDF` 文件头；将内容写入临时文件。
+3. 优先用 pdfplumber 提取第一页文本，失败或无可用文本时使用 pypdf；结束后删除临时 PDF，不建立持久化全文库。
+4. 归一化首页文本，低于 `AFFILIATION_ENRICH_PAGE_TEXT_MIN_CHARS`（默认 200）时返回 `text_extract_failed`。目前没有 OCR，扫描型或无法提取文字的论文可能失败。
+5. 截取首页前置信息：在超过 120 字符的位置识别 Abstract、Figure、Keywords、Introduction 等边界，取最早边界之前内容，并限制到 4000 字符；再去除可识别的论文标题和标题前缀。
+6. 将论文 ID、标题及前置信息发给模型，要求只返回 `affiliations` 数组，每项包含 `name`、布尔 `is_institution` 和 `reason`。本步骤使用 temperature=0、max_tokens=600 的普通 JSON 请求。
+7. 模型需识别真实大学、企业、研究所、医院或实验室，排除作者名、邮箱、链接、地址、资助单位、标题、方法名、数据集和章节名。名称保留官方英文拼写与正常单词空格，不允许凭空补充机构。
+8. 程序清理空值、编号和多余空白，规范逗号/分号后的空格并去重；进一步拒绝标题片段，检查机构在来源文本中的证据。证据匹配兼容大小写、标点和 PDF 单词粘连，不依赖英文名称完全无差异地逐字符复制。
+9. 必须同时满足机构列表非空且无拒绝理由，才返回 `overwrite_applied`；任一机构被否决或缺少证据时携带反馈重试，实际提取尝试次数限制在 1–5 次。请求层模型重试在这之外另行生效。
+
+主流程在单次 JSON 输出内同时取得机构名称和机构判断，不在成功提取后逐个再调用独立 Reviewer。文件保留的独立机构审核等辅助方法不等同于当前主调用路径。
+
+| 状态 | 含义 | 写入行为 |
+| --- | --- | --- |
+| `overwrite_applied` | 非空机构列表通过模型判断与程序证据校验 | 将列表写入 paper.affiliations |
+| `skipped_no_pdf_url` | 缺少 PDF 地址 | 不覆盖已有机构 |
+| `download_failed` | 下载失败或响应不是 PDF | 不覆盖已有机构 |
+| `text_extract_failed` | 首页文字提取失败或过短 | 不覆盖已有机构 |
+| `skipped_not_institution` | 候选不是机构或类似论文标题片段 | 不覆盖已有机构 |
+| `skipped_no_text_evidence` | 无法在原文中匹配机构证据 | 不覆盖已有机构 |
+| `skipped_structure_invalid` | JSON 或机构判断字段不合法 | 不覆盖已有机构 |
+| `skipped_low_confidence` | 结果为空或其他低质量情况 | 不覆盖已有机构 |
+| `failed` | 流水线捕获未预期异常 | 记录进度错误，继续主生产流程 |
+
+机构补全失败不影响论文继续进入 Editor/Writer/Reviewer。提取状态、次数和原因在本次内存结果及运行日志中记录，没有独立机构审计表，也没有写入 paper_ai_trace。只有成功机构列表作为论文元数据落库。
+
+**评分时序：** Scorer 能读取输入中的论文级机构及作者单位，但日常流程先评分、后执行 PDF 机构补全，补全之后不重新计算该期分数。Crawler 也不从旧 paper 行回读机构后再评分。因此不能把“新增机构字段”解释为当前每期都先从 PDF 补齐机构再执行顶尖机构加分。
+
+### 5.3 多信号评分模型与计算规则
+
+| 信号 key | 中文含义 | 分数 | 精确触发规则 |
+| --- | --- | --- | --- |
+| `top_org` | 顶尖机构 | +20 | 遍历论文级 affiliations 及作者 affiliation；任一白名单机构命中即加一次 |
+| `hf_recommend` | HF 推荐 | +30 | 合并后 `is_hf_daily` 为真 |
+| `community_popularity` | 社区热度 | 0 / 10 / 20 / 40 | upvotes <10 不加分；10–49 加10；50–99 加20；≥100 加40 |
+| `top_conf` | 顶会收录信号 | +25 | 只在 venue 匹配 ICLR、NeurIPS、CVPR、ICML、ACL、EMNLP |
+| `has_code` | 代码信号 | +20 | 标题/摘要含 `github.com`，或命中 `official code`、`code available` |
+| `practitioner_relevance` | 工程相关 | +15 | 标题/摘要命中 Deploy、Quantization、RAG、Inference、Agent 任一个 |
+| `academic_influence` | 引用影响 | 最多 +30 | `min(30, citations × 2)` |
+| `os_trending` | 开源趋势 | +25 | 提取的 GitHub 仓库命中此次抓到的 Trending 列表 |
+
+机构、venue、工程词和方向词采用不区分大小写的字面量单词边界正则：关键词先 `re.escape`，再包装 `\b(?:关键词)\b`。`github.com` 检测是显式子串判断，不能套用“所有信号都只用单词边界”的旧描述。
+
+每类信号最多加一次，多机构、多关键词命中不会累加同一类分数。`score_reasons` 只记录产生加分的项，正常输入下总分等于各项之和。该逻辑没有将累计分数归一化到 100。
+
+**机构完整白名单（45 项）：** Google、DeepMind、OpenAI、Meta、FAIR、Microsoft、Anthropic、NVIDIA、Stanford、MIT、UC Berkeley、Carnegie Mellon、CMU、Harvard、Oxford、Cambridge、Princeton、ETH Zurich、Tsinghua University、Peking University、THU、PKU、Shanghai Jiao Tong、SJTU、Fudan University、Zhejiang University、ZJU、Huawei、Noah's Ark、Baidu、Tencent、Alibaba、DAMO Academy、ByteDance、TikTok、Kuaishou、SenseTime、MEGVII、IBM Research、Amazon、Salesforce、Apple AI、Hugging Face、Allen Institute、AI21。
+
+示例：某论文命中 HF 推荐 +30、20 个赞 +10、代码信号 +20、工程相关 +15、6 次引用 +12，其总分为 87。它具有进入 Focus 的优先资格，但是否最终进入还取决于同一期排名与 AI 处理结果。该示例仅用于说明计算，不对应真实论文。
+
+### 5.4 技术方向分类规则
+
+只在英文原题和摘要中查找，按下表顺序匹配，第一命中即返回；不是多标签，也不是模型自由生成分类。没有任何关键词命中时回退 `Industry_Trends`。
+
+| 顺序 | 方向 key | 方向含义 | 完整匹配关键词 |
+| --- | --- | --- | --- |
+| 1 | `Agent` | 智能体、工具使用与规划 | agent, tool use, autonomous, planning |
+| 2 | `Reasoning` | 推理与数学 | reasoning, chain-of-thought, cot, math, theorem |
+| 3 | `Training_Opt` | 训练与效率优化 | quantization, lora, peft, distributed training, optimization, memory-efficient |
+| 4 | `RAG` | 检索增强与长上下文 | rag, retrieval-augmented, vector database, long-context |
+| 5 | `Multimodal` | 多模态和视觉语言 | multimodal, vision-language, vlm, cross-modal |
+| 6 | `Code_Intelligence` | 代码智能 | code generation, code completion, program synthesis |
+| 7 | `Vision_Image` | 图像生成与视觉 | diffusion, image generation, segmentation, stable diffusion |
+| 8 | `Video` | 视频生成与理解 | video generation, video understanding, sora, temporal consistency |
+| 9 | `Safety_Alignment` | 安全与对齐 | rlhf, alignment, red teaming, jailbreak, safety, toxicity |
+| 10 | `Robotics` | 机器人与具身智能 | robotics, embodied ai, manipulation, navigation |
+| 11 | `Audio` | 音频和语音 | audio generation, speech recognition, tts, asr |
+| 12 | `Interpretability` | 可解释性 | interpretability, mechanistic, attention map, explainable |
+| 13 | `Benchmarking` | 评测与数据集 | benchmark, evaluation, dataset, metric |
+| 14 | `Data_Engineering` | 数据工程 | synthetic data, data curation, data pipeline, pre-training data |
+| 15 | `Industry_Trends` | 综述与行业趋势 | survey, review, perspective, roadmap；也是无命中兜底 |
+
+例如同时出现 `agent` 和 `rag` 会归 Agent；同时出现 `quantization` 和 `rag` 会归 Training_Opt。这种优先级会影响专题收录，方向名不代表对论文所有研究主题的完整覆盖。
+
+### 5.5 论文筛选、候选补位与状态转换
+
+#### 初始选题规则
+
+1. 对合并后的全部论文评分并降序排序。
+2. 保留全部评分结果，不截取前 50；后续初选和补位都可使用完整评分集合。
+3. Focus 取 ≥80 的前 5；不足时遍历剩余排名补到 5 或候选耗尽。
+4. Focus 补位队列是未被初选为 Focus 的所有论文，按已有排名排列。
+5. Watching 初选池排除初始 Focus，仅保留 50≤score<80，前 12 入选，剩余作为 Watching 补位。
+6. 关闭 Watching 时不处理该档位，相关记录仍留在快照中作为 Candidate。
+7. 对初选 Focus/Watching 执行论文机构补全，再写入全部论文元数据和快照。机构提取失败不阻断主链；后续动态补位没有再次调用机构提取。
+
+评分器产生的 `threshold_category` 仅为阈值判定结果，最终 category 由流水线选择和 AI 结果决定，不直接照抄。
+
+#### 单篇处理机制与执行次数限制
+
+先处理 Focus，再处理 Watching。每个档位将初选与补位队列连接，逐篇执行，直到达到初始目标数、队列耗尽或尝试预算耗尽。
+
+每档最大尝试论文数为：
+
+```text
+min(队列长度, 配置总上限, max(目标数, 目标数 × 档位倍率))
+```
+
+默认 Focus 目标 5 时最多尝试 20 篇，Watching 目标 12 时最多尝试 24 篇，还要受队列长度和全局 30 上限限制。这个计数是尝试不同论文的数量，不是 LLM 请求次数。
+
+一期维护共享 `seen_ids`；已在 Focus 阶段尝试过的论文不会在 Watching 再跑一遍。若 Watching 初选论文被 Focus 补位提升，Watching 阶段跳过它，避免重复生成和 trace 冲突。Watching 不保证重新回到 12 篇。
+
+#### 处理结果与状态映射
+
+| 情况 | 最终动作 |
+| --- | --- |
+| 初选或补位论文完成所需 AI 流程 | 升为对应 Focus/Watching，清空候选原因，写入 6 个解读字段 |
+| 标题/模型/解析等处理异常 | 降为 Candidate，原因统一 `reviewer_rejected`，清空解读 |
+| 严格模式下 Reviewer 重试耗尽仍拒绝 | 同样降为 Candidate，并尝试下一篇 |
+| 未进入处理、分数低于 50 | Candidate / `low_score` |
+| 未进入处理、分数达到 50 但未获得档位名额 | Candidate / `capacity_overflow` |
+| 处理成功数大于 0 | 正常流程可将当期标为 SUCCESS，不要求 5+12 满额 |
+| 全部 AI 未产出成功项或抓取最终为空 | 当期 FAILED |
+
+**当前边界：** 快照是在 AI 之前按初选档位播种。代码对已经尝试且失败的论文做降级，但没有在发布结束前统一检查所有初选记录是否都生成了解读。因此特殊的预算耗尽、跨档位跳过路径可能留下 category 为 Focus/Watching 但解读为空的记录。`processed_count` 表示实际成功处理数，不能绝对等同于数据库中非 Candidate 行数。此处记录现状，不把完整性门禁写成已实现。
+
+### 5.6 中文标题本地化
+
+全部评分论文先设置可存储的标题占位，正常英文原题使用“待翻译：原题”。进入 AI 的论文再尝试单篇本地化；一期结束前查询该期仍带待翻译前缀的论文并批量补译，此查询也可能覆盖 Candidate。
+
+有效中文标题需非空、包含中文汉字、不同于英文原题，且不是待翻译占位。提示要求保留模型名、框架名、数据集名和专业缩写，不添加解释。标题批量输出为以 `arxiv_id` 为 key、中文标题为 value 的 JSON 对象，解析校验输入记录覆盖。
+
+格式或语言校验失败会携带失败反馈重试；次数耗尽回退占位，不伪装成成功译文。另有 `backfill_title_zh.py` 修复历史标题。标题在 `paper` 中存储，同一论文重新本地化后会影响所有期号列表连接出的标题。
+
+### 5.7 AI 角色契约与质量控制
+
+#### Editor 阶段：内容定调与输出规范
+
+输入包含锁定论文的 ID、英文标题、中文标题、分数、方向和截断后的摘要；摘要先折叠空白，再按 `LLM_ABSTRACT_MAX_CHARS` 截断，默认最多 16000 字符，配置≤0时不截断；完整重跑时附带上一轮 Reviewer 反馈。Editor 不负责重新选论文，不允许增加、删除或替换输入 ID。
+
+输出要求问题、方法与价值具体，避免营销式断言和无来源实验结果。每篇使用：
+
+```markdown
+## 论文: [arxiv_id]
+- **写作角度**: 面向读者应关注的主线
+- **核心痛点**: 论文试图解决的具体问题
+- **具体解法**: 论文使用的方法或系统机制
+```
+
+解析时校验块数量等于输入数量、ID 不重复、ID 集合完全一致、三个字段均存在且非空。标准输出按 `## 论文: [ID]` 组织；实际 Editor 正则兼容缺少外层方括号的 ID，ID 归一化还兼容 `arxiv_id=`、`paper_id=`、`id=` 前缀。归一化后再验证与输入一致。最后一个字段也允许位于文本末尾。
+
+#### Writer 阶段：双语内容生成与校验规范
+
+输入为 Editor 定调和论文元数据，并注明 Focus 或 Watching。输出：
+
+```markdown
+## [arxiv_id]
+- **一句话总结**: 中文的核心价值判断
+- **One-line Summary**: Corresponding English summary
+- **核心亮点**:
+  - 中文亮点
+- **Core Highlights**:
+  - Corresponding English highlight
+- **应用场景**: 与论文证据一致的使用或研究场景
+- **Application Scenarios**: Corresponding English scenarios
+```
+
+这段仅示意字段形态；正式 Focus 必须 3–5 条亮点，Watching 1–2 条。解析提取全部六个字段，按 Markdown 列表提取中英文亮点，检查非空、条数对称与档位长度范围，并再次校验记录数与 ID 集合。
+
+提示词要求不虚构指标、数据规模、比较对象、部署效果或商业落地；当摘要证据不足时不能硬写过强结论。语义质量由模型约束，程序中的硬校验主要保障字段、ID 和条数，不构成事实准确性的形式证明。
+
+#### Reviewer 阶段：发布审核与结论规范
+
+输出归一化后只允许两行：
+
+```markdown
+- **整体结论**: PASSED
+- **拒绝名单**: []
+```
+
+或：
+
+```markdown
+- **整体结论**: REJECTED
+- **拒绝名单**: [arxiv_id]
+```
+
+程序通过 fullmatch 校验两行契约，PASSED 必须空拒绝列表，REJECTED 必须非空且所有 ID 都来自 Writer 输出。当前 Reviewer 调用接收 Writer 文本，不另外传入论文全文或完整原始材料；因此虽有忠实性审核提示，不能将它描述为逐项对照全文的事实核验。输出也没有结构化的拒绝理由字段，重试反馈主要由结论与拒绝 ID 构成。
+
+#### 模型输出归一化与格式修复机制
+
+Editor/Writer 解析在归一化之后要求零前缀，拒绝不符合结构的额外文本。但代码能够去掉 Markdown 代码围栏、规范换行和部分包装；Reviewer 还允许跳到结论锚点前去掉前言。因此“原始输出任何额外字都立刻失败”不是当前精确行为。
+
+有原始文本但结构不合法时抛出 `StructuredOutputError`，保留 `raw_output`，调用专门的 Editor/Writer/Reviewer 修复函数，再走原解析器。修复不是跳过校验，仍需满足同一字段与 ID 契约。
+
+### 5.8 分层重试、AI 过程记录与异常处理
+
+重试分为四层，不能只写成“失败重试两次”：
+
+| 层级 | 默认行为 | 作用 |
+| --- | --- | --- |
+| 请求层 | 普通最多 3 次，长文本最多 2 次，带退避与最小间隔 | 处理模型请求失败 |
+| 单轮阶段层 | Editor 最多 3 次；Writer/审核循环最多 3 次，并可修复格式 | 处理结构错误和写作质量问题 |
+| 完整角色链 | Reviewer 持续拒绝时最多 5 轮完整链 | 把拒绝反馈重新带入 Editor 和 Writer |
+| 期号执行层 | 共享 runner 默认最多 2 次，第一次异常后清理期号状态 | 恢复整期运行失败 |
+
+完整重跑以 `pipeline_attempt × 100` 作为 trace 编号偏移，阶段尝试再加 1、2、3；invalid 原文通过 `attempt_no × 10 + 1` 编号以避免与修复后的正常阶段产物占用同一唯一键。编号是编码后的尝试标识，不是连续的累计模型调用数。
+
+Editor/Writer 成功解析的逐篇块记录为 generated；Reviewer 对通过论文记录 accepted，对拒绝论文记录 rejected；不合法原文记录 invalid。Candidate 如曾进入 AI，其已有 trace 可在成功提交的期号中保留，即使最终解读被清空。
+
+非严格模式下，Reviewer 拒绝、格式问题或异常路径允许接受已经通过 Writer 结构校验的输出；trace 可能仍显示审核拒绝。因此只有默认严格模式才能把“审核通过”作为正常发布说明。
+
+单篇连续完整审核失败后，流水线直接向维护者发尽力而为的告警，该路径传入空数据库会话，不写投递日志、不使用同日投递去重。整个期号事务失败会回滚尚未提交的论文快照和 trace，失败恢复又可能清理期号记录；当前 trace 不是不可丢失的独立审计账本。
+
+### 5.9 任务事务管理与期号幂等机制
+
+`Pipeline.run` 先创建或更新任务为 RUNNING 并单独提交，随后抓取、评分、写论文、重建本期快照、执行 AI。正常结束设置抓取数量、成功处理数、SUCCESS、完成时间，并提交内容事务。
+
+发生整体异常时回滚内容事务，再查询或创建当期任务，写 FAILED、计数、异常堆栈和完成时间并提交，然后抛出异常。单篇错误由分类处理逻辑捕获，不直接走整期失败。
+
+论文按 `arxiv_id` 查询并更新；快照以 `(paper_id, issue_date)` 唯一；任务以 `issue_date` 唯一。这些约束避免同键插入重复记录，但不等同于分布式互斥锁。RUNNING 状态目前不会阻止另一个进程再次启动同一期。
+
+`Pipeline._start_task` 自身拒绝已 SUCCESS 的期号。**但共享 `run_issue_pipeline` 会捕获任意异常，第一次失败后删除该期 trace、快照和任务，再重跑一次**，并没有单独排除“已经成功”的异常。因此不能声称所有入口都会绝对保护 SUCCESS 不被重跑。历史范围回填在调用前主动跳过已有 SUCCESS，日更入口则没有同样的预检查。
+
+清理函数保留共享 `paper` 元数据，不清理邮件投递日志。期号重试不是无限循环，默认第二次仍失败即向调用者抛出；维护者排障应先确认具体入口、期号状态和是否发生清理，不能仅依赖旧 PRD 的“必须人工清除成功状态”描述。
+
+### 5.10 API 总体契约
+
+业务接口前缀为 `/api/v1`。JSON 成功响应统一为：
+
+```json
+{"code":200,"msg":"success","data":{}}
+```
+
+业务错误使用对应 HTTP 状态及 `{code,msg,data:null}`；Pydantic 参数错误统一转换为 HTTP 400，非 422；未处理异常返回 HTTP 500。根路径 `/` 返回欢迎对象，不采用相同 envelope；验证成功是 302 跳转，RSS 是 XML。
+
+查询接口不需要登录。当前没有管理员写入论文接口。CORS 配置允许任意 origin，并启用 credentials、全部方法与 header；这是现有宽松配置，不是细粒度访问控制。异常字符串可能直接出现在 `msg`，也没有统一业务错误枚举。
+
+### 5.11 论文列表接口
+
+`GET /api/v1/papers`
+
+| 参数 | 类型/默认值 | 规则 |
+| --- | --- | --- |
+| `page` | int，1 | 必须 ≥1 |
+| `limit` | int，10 | 1–100 |
+| `category` | 可选 string | 按快照档位精确过滤 |
+| `direction` | 可选 string | 按方向 key 精确过滤 |
+| `issue_date` | 可选 date | `YYYY-MM-DD`，按一期过滤 |
+| `include_candidates` | bool，false | 默认只查 Focus/Watching，true 才允许 Candidate |
+
+返回 `data={total,items}`，`total` 是过滤后的快照行数，不是不同论文数。SQL 连接 `PaperSummary` 与 `Paper`，排序为期号倒序 → Focus、Watching、Candidate → 分数倒序。同分没有额外稳定排序键。
+
+每个 item 包含：`id`（paper ID）、`arxiv_id`、`title_zh`、`title_original`、`score`、`category`、`candidate_reason`、`direction`、`issue_date`、`score_reasons`、`one_line_summary`、`one_line_summary_en`。不包含完整亮点、应用场景、摘要或作者。
+
+`category=candidate` 但未开启 `include_candidates` 会被默认范围排除，返回空集。category/direction 参数当前是字符串，不进行固定枚举参数校验；未知值通常返回空集。列表不按任务 SUCCESS 状态额外联表过滤。
+
+调用示例：
+
+```text
+/api/v1/papers?page=1&limit=100&issue_date=2026-09-07&include_candidates=true
+/api/v1/papers?page=1&limit=20&direction=Agent
+```
+
+### 5.12 日历接口
+
+`GET /api/v1/papers/calendar` 不需要参数。返回：
+
 ```json
 {
-  "code": 200, // 200: 成功, 400+: 业务/参数错误, 500+: 内部错误
-  "msg": "success", 
-  "data": { ... } // 失败时或无返回数据时为 null
+  "code": 200,
+  "msg": "success",
+  "data": {
+    "min_issue_date": "2026-09-05",
+    "max_issue_date": "2026-09-07",
+    "latest_with_content": "2026-09-07",
+    "days": [
+      {"issue_date":"2026-09-05","has_content":true,"paper_count":4},
+      {"issue_date":"2026-09-06","has_content":false,"paper_count":0},
+      {"issue_date":"2026-09-07","has_content":true,"paper_count":7}
+    ]
+  }
 }
 ```
 
-### 6.2 接口清单与全量 Payload
-1.  **GET /api/v1/papers** (列表分页)
-    *   **Params**: `page` (int), `limit` (int, max 100), `category`, `direction`, `issue_date`, `include_candidates` (bool)。
-    *   **Response Payload**: `{ "total": INT, "items": [ { "id", "arxiv_id", "title_zh", "title_original", "score", "category", "candidate_reason", "direction", "issue_date", "one_line_summary", "one_line_summary_en" } ] }`。
-2.  **GET /api/v1/papers/{id}** (单篇详情)
-    *   **Response Payload**: 包含列表字段 + `abstract`, `authors`, `affiliations`, `venue`, `score_reasons`, `core_highlights`, `core_highlights_en`, `application_scenarios`, `application_scenarios_en`。
-    *   **NULL 契约**: 
-        *   若目标论文 `category == 'candidate'`，响应中所有的解读字段 (core_highlights 等) 必须显式返回 `null`。
-        *   若目标论文 `category != 'candidate'`，响应中的 `candidate_reason` 必须返回 `null`。
-    *   **机构缺失语义**:
-        *   `affiliations` 为空时，后端可兼容返回 `authors[].affiliation` 聚合结果；两者均为空时不得伪造机构信息。
-        *   `venue` 仍作为评分与元数据字段保留，但不得作为机构兜底来源。
-3.  **POST /api/v1/subscribe**: `{ "email": "..." }` $\rightarrow$ `{ "code": 200, "msg": "邮件已发送", "data": null }`。
-4.  **GET /api/v1/subscribe/verify**: 验证激活。
-    *   **Params**: `token` (string, required)。
-    *   **Response**: **HTTP 302** 重定向至前端成功页。
-5.  **POST /api/v1/unsubscribe**: `{ "token": "..." }` $\rightarrow$ `{ "code": 200, "msg": "退订成功", "data": null }`。
-6.  **GET /api/v1/rss**: **原始 XML (application/xml)** 数据。结构包含 `<channel>` 下属 `<item>` (含 `title`, `link`, `description`, `pubDate`)。
+示例仅说明响应结构。每天的 `paper_count` 只计 Focus/Watching，Candidate 不计为可读内容；`latest_with_content` 是有这些档位记录的最大期号。最小/最大范围优先使用任务表边界，没有任务边界才用快照边界，不是无条件取两表并集的最值。
 
----
+接口遍历边界内所有自然日补齐零内容日期。数据库完全没有期号时三个日期为 null、days 为空。当前不校验对应任务必须 SUCCESS，也不验证每行解读非空，因此“有内容”精确含义是存在 Focus/Watching 快照。
 
-## 7. 运维与安全规格 (Ops)
-*   **超时配置**: Semantic Scholar (5s), arXiv (30s), KIMI 短请求 (60s), KIMI 长文本请求 (180s)。
-*   **限流策略**: 针对 `/subscribe` 相关写入接口，限制 5 次/小时/IP。
-*   **Token 有效期**: `verify_token` 与 `unsub_token` 统一设为 **24 小时**。
+### 5.13 详情接口
 
----
+`GET /api/v1/papers/{paper_id}`，ID 为整数。按 paper ID 找关联快照，期号倒序取第一条；没有关联快照时返回 404 `Paper not found`。
 
-## 8. 前端体验与本地预览规格 (Frontend UX)
+返回列表 item 的全部字段，再增加：`authors`（`[{name,affiliation}]`）、`affiliations`（论文级机构字符串数组）、`venue`、`abstract`、`pdf_url`、`arxiv_publish_date`、`core_highlights`、`core_highlights_en`、`application_scenarios`、`application_scenarios_en`。
 
-### 8.1 当前视觉定位
-*   前端当前定位为“研究简报站”，不是后台管理系统。
-*   视觉基调采用暖白页面底、炭黑正文、低饱和强调色与克制阴影，整体参考 Claude 式温和配色结构。
-*   页面信息架构强调编辑化阅读节奏：
-    *   首页以当期简报、Focus 主卡流、Watching 次级流、日历与方向入口组成主阅读路径。
-    *   详情页以标题、核心摘要、亮点、应用场景和原论文信息组成长阅读路径。
-    *   候选池页用于保留未入选论文和筛选原因，移动端应转为更适合阅读的信息卡片结构。
+作者如果是历史字符串格式，接口转为姓名加空单位对象。机构列表优先读取 `paper.affiliations`，兼容列表中的字符串或 name/affiliation/institution/organization 对象及单字符串；无有效值时回退作者单位。API 以不区分大小写且折叠空白的 key 去重，但返回名称保留英文单词间空格；两种来源都缺失时返回空数组。Candidate 的解读为空依赖持久化层正确清理；API 本身没有额外强制将脏数据归零的分支。接口不返回 AI trace、任务错误日志、订阅信息或原始引用次数。
 
-### 8.2 移动端与交互约束
-*   移动端 Header 必须使用抽屉式导航，不应退回到横向导航自动换行。
-*   抽屉导航至少支持：
-    *   菜单按钮打开；
-    *   遮罩点击关闭；
-    *   `Esc` 关闭；
-    *   路由切换后自动关闭；
-    *   打开时锁定 body 滚动。
-*   桌面端可交互模块允许轻微 hover / focus 反馈，动效应保持克制，避免强烈黑色光晕、大面积动态玻璃或持续动画背景。
-*   移动端不启用复杂动态玻璃按钮效果；主按钮保持稳定纯黑高对比样式，保证文字清晰。
-*   方向标签属于导航入口：首页与详情页中的方向标签必须可点击并跳转到对应方向页。
+### 5.14 订阅与验证接口
 
-### 8.3 详情页事实卡展示规则
-*   详情页顶部事实卡当前固定展示：作者、机构、arXiv 编号。
-*   机构卡片的数据源优先为论文级 `affiliations`；为空时兼容 `authors[].affiliation`，前端需先执行去空与去重。
-*   当有效机构数为 1-2 个时，直接展示完整机构名；当机构数 >= 3 时，允许压缩展示，并通过悬停提示暴露完整列表。
-*   若当前论文无有效机构，前端必须明确提示“未识别到论文机构 / Institutions not identified”，不得显示空白，也不应将 `venue` 伪装成机构。
+`POST /api/v1/subscribe` 请求为 `{"email":"reader@example.com"}`，邮箱由 `EmailStr` 校验。按照邮箱查询 subscriber：
 
-### 8.4 Mock 预览开关
-*   正式运行与普通本地运行默认请求真实后端 API。
-*   仅当 `VITE_USE_MOCK_BRIEF_DATA=true` 时，前端才允许切换到运行时 mock provider。
-*   mock provider 只服务本地视觉评审和无后端预览，不得成为生产默认路径。
-*   前端 API 基准地址继续通过 `VITE_API_BASE_URL` 配置；未设置时使用现有默认值。
+| 原状态 | 动作 | 邮件 | 结果 |
+| --- | --- | --- | --- |
+| 无记录 | 新建 status=0、验证/退订 token 和到期时间 | 验证邮件 | `msg=邮件已发送` |
+| status=0 | 刷新 token 和有效期，维持未验证 | 验证邮件 | 等待点击 |
+| status=2 | 改为未验证并刷新凭证 | 验证邮件 | 重新确认后恢复 |
+| status=1 | 保持活跃、刷新退订 token | 管理邮件 | `msg=该邮箱已订阅，最新管理链接已发送` |
 
-### 8.5 README 截图约束
-*   README 首页截图使用 `image/readme-home-v2.png`。
-*   当前截图尺寸固定为 `1365 x 900`，后续替换时应保持相同比例，避免 README 展示尺寸跳变。
-*   正式截图应来自真实后端 API 数据，不应使用 mock 数据截图。
+token 使用 UUID 字符串，验证和退订均配置为 24 小时。先 flush 记录，再调用 SMTP；发送失败回滚并返回 503，发送成功才提交。邮件已发送但数据库提交失败无法用数据库事务撤回邮件，这是外部副作用边界。
+
+`GET /api/v1/subscribe/verify?token=...` 查询验证 token，不存在、没有有效期、已过期分别返回 400。验证有效后将状态设为 1，清空 verify_token 和 verify_expires_at，提交，再 302 到 `FRONTEND_URL/?subscribe_success=1`。重复使用已经清空的验证 token 会失败。
+
+### 5.15 退订与接口限流
+
+`POST /api/v1/unsubscribe` 请求为 `{"token":"..."}`。不存在、有效期为空、过期返回 400；有效时设 status=2 并提交，返回 `msg=退订成功`。成功后没有清空 unsub_token，所以同一仍有效 token 可重复退订。
+
+订阅和退订写接口共用每 IP 每小时最多 5 次的滑动窗口。存储是当前 Python 进程内的字典，线程锁保护读写；IP 来自 `request.client.host`。服务重启会清空计数，多进程之间不共享，代理部署下识别的 IP 还依赖代理头处理。因此该实现不是 Redis 支持的全局限流，也不能默认声明同一用户在所有实例中共享配额。
+
+验证 GET 不使用上述写限流。第 6 次被拒绝时返回 429。失败的有效请求也可能消耗次数；前端不能通过连续点击绕过服务端约束。
+
+当前创建/验证接口使用 UTC aware 时间转入无时区 DATETIME；日报刷新退订 token 时使用上海时区，而验证退订时将读出的值直接标为 UTC。存在无时区存储与时区解释不一致的风险，因此 24 小时是代码设定的名义有效期，尚不能声明所有发送路径都严格保持相同实际时长。
+
+### 5.16 RSS 兼容接口
+
+`GET /api/v1/rss` 返回 `application/xml` 的 RSS 2.0。以上海当天减 7 天作为下界，查询 `issue_date >= 下界` 的 Focus/Watching，按期号和分数倒序；当前没有显式截止日期条件。
+
+channel 包含 title、link、description、language；item 包含带期号的中文标题、详情链接、中文一句话总结、以期号当日上海零点构造的 pubDate，以及 `paperID-issueDate` guid。没有 Candidate，也不返回完整双语解读。
+
+该接口在后端保留并挂载，但前端没有 RSS 入口；作为兼容行为记录，不能据此把网站导航描述成已有 RSS 页面。
+
+### 5.17 日报邮件生成、发送与幂等
+
+邮件任务默认使用上海当天为目标期号，也可指定历史期号；`run_date` 始终是实际发送当天。执行顺序为数据库检查 → 查询任务 SUCCESS → 查询非 Candidate 内容 → 查询活跃订阅者 → 逐人生成链接和正文 → 发送并记录。
+
+以下情况直接跳过：目标期号没有成功任务、有成功任务但没有可发布行、没有活跃订阅者。手动指定收件人仍必须匹配活跃订阅记录，不能借此向任意陌生邮箱群发；部分未匹配地址在结果中列出，全部不匹配抛错。
+
+每个收件人发送前刷新退订 token，邮件正文包含中英文标题、中文总结、网站详情链接和新退订链接。旧链接会因 token 替换而无效。正文为纯文本和 HTML，两者都覆盖 Focus/Watching，空档位使用暂无内容说明，动态 HTML 文本进行转义。
+
+底层 SMTP 在发信前校验 host 和发件地址、端口必须为正数、用户名与密码必须成对出现，并禁止同时开启 SSL 与 STARTTLS。连接超时为 30 秒；非 SSL 模式建立 SMTP 后可执行 STARTTLS，再按配置登录并发送 MIME 邮件。底层没有独立的自动发信重试循环，失败由上层记录并由后续脚本执行恢复。
+
+发送去重键是 `(notification_type, run_date, recipient_email)`，只有已有状态为 sent 才跳过；failed 可以重试，`dry_run` 不发信、不记成功。**去重键不含 issue_date**，所以同一天向同一订阅者补发不同期号，后一次也可能因为已有 daily_digest sent 被跳过。
+
+每封发送成功即写 sent 并提交；失败记 failed 和错误并提交，继续处理其他人。结束后若有失败收件人，尝试发维护者告警并抛出汇总异常；正常结果包含 sent_count、skipped_recipients、failed_recipients、未匹配收件人和 dry_run。
+
+这是一种发送后记账的防重复机制，不是 SMTP 与数据库之间的原子提交：SMTP 已接收而写日志失败时，后续可能重发；没有投递回执、打开追踪、退信自动停订或邮件队列。
+
+### 5.18 运行告警与日志管理
+
+日更任务的提示词缺失、运行配置错误、数据库检查失败或流水线整体异常会进入维护者告警路径。可以用 `--skip-owner-alert` 关闭该次日更错误告警。数据库不可用时存在直接发邮件的兜底，告警本身失败则写终端日志，不会伪装主任务成功。
+
+常规任务告警通过 notification_delivery_log 使用 `job_alert` 和发送日期去重，同一天同一维护者已有 sent 时，后续不同任务告警可能跳过。Reviewer 重跑耗尽告警是独立直接发信路径，不适用这一去重规则。
+
+日志分工：system_task_log 记录一期生产结局和堆栈；paper_ai_trace 记录模型阶段文本；notification_delivery_log 记录日报/告警发送结果；cron 文本日志记录进度和命令输出。它们不是面向普通读者的公开 API 数据。
+
+#### 阶段执行进度
+
+流水线日志按 `[pipeline][档位][论文ID][阶段]` 输出阶段、状态及 attempt 编号。状态覆盖 start、generated、invalid、repaired、accepted、rejected、error；附加 detail 折叠空白并限制到 160 字符。日志同时包含机构提取进度、分类累计尝试/通过数量和标题补译的期号、批次序号、批大小、总标题数量，便于区分等待外部响应、结构修复和批处理推进。
+
+阶段日志不替代数据库 trace。文本日志可能记录外部错误摘要，而 trace 保存阶段内容；stdout 管道关闭时的安全日志函数会忽略 BrokenPipeError，使运行不因输出终端断开而直接停止。
+
+#### 模型用量记录与汇总
+
+设置 `LLM_USAGE_LOG_PATH` 后，AIProcessor 对取得非空内容且带有 provider usage 的非流式响应追加一条 JSONL。字段包括 UTC timestamp、model、longform、prompt_tokens、completion_tokens、total_tokens、prompt_cache_hit_tokens、prompt_cache_miss_tokens、reasoning_tokens。没有路径或没有 usage 时跳过；日志文件写入出现 OSError 时不阻断成功请求。
+
+用量记录仅保存数值和必要元信息，不保存密钥、提示词正文或模型正文。它覆盖经过该处理器成功返回的请求，包括机构提取等使用相同调用入口的请求；不是对所有网络失败、空输出或其他脚本直接调用的完整计费账单。
+
+`summarize_llm_usage.py --path <JSONL文件>` 输出全局 totals 和 by_model，累加请求数及上述 token 字段。该脚本没有硬编码模型单价，也不计算实际货币费用；结果用于与供应商账单对照，不能直接视为最终账单。用量日志不写入数据库，也没有网页展示入口。
+
+### 5.19 运维脚本与执行流程
+
+以下命令均从仓库的 `backend` 工作目录执行，使用已安装依赖的 `venv/bin/python`；命令中的日期和邮箱为说明用途。
+
+| 入口 | 用途 | 行为与参数 |
+| --- | --- | --- |
+| `scripts/setup_local_db.py` | 初始化并检查数据库 | 默认自动补充缺失的 paper.affiliations 列；其他结构差异可显式使用 `--migrate-existing`，标题修复使用 `--backfill-title-zh` |
+| `scripts/setup_local_mysql.py` | 本机 MySQL 引导 | 面向本地系统 MySQL 场景，不是 Ubuntu 常驻服务 |
+| `scripts/check_kimi_api.py` | 模型连通性与输出检查 | 文件名沿用历史 Kimi，实际读取当前模型配置 |
+| `scripts/run_pipeline_once.py` | 手工探测并运行一次完整链 | 检查配置、提示词、数据库和模型，探测可用期号；`PIPELINE_FIXED_ISSUE_DATE` 可指定期号，不等同于默认固定当天的日更 |
+| `scripts/run_daily_update_job.py` | 正式日更入口 | 默认上海当天；支持 `--issue-date`、`--skip-owner-alert` |
+| `scripts/backfill_issue_range.py` | 按闭区间逐期回填 | `--start-date`、`--end-date`、`--skip-llm-check`；跳过已有 SUCCESS，单日失败后继续 |
+| `scripts/backfill_title_zh.py` | 修复历史未译标题 | `--batch-size`，默认 20；按批处理并提交 |
+| `scripts/backfill_affiliations.py` | 历史论文机构补全 | 日期、paper ID、arXiv ID、limit 筛选；默认不写库，`--apply` 才提交，`--include-existing` 允许重提取已有机构 |
+| `scripts/summarize_llm_usage.py` | 模型用量汇总 | `--path` 指定 JSONL 日志，输出总计和按模型统计 |
+| `scripts/send_daily_digest.py` | 发日报 | 支持 `--issue-date`、`--recipient-override`（逗号分隔邮箱）、`--dry-run` |
+| `scripts/install_linux_cron.py` | 安装定时任务 | 以受管理标记块替换已有配置，保留块外其他任务 |
+
+典型日更：
+
+```bash
+venv/bin/python scripts/run_daily_update_job.py --issue-date 2026-09-07
+venv/bin/python scripts/send_daily_digest.py --issue-date 2026-09-07 --dry-run
+```
+
+历史回填：
+
+```bash
+venv/bin/python scripts/backfill_issue_range.py --start-date 2026-09-01 --end-date 2026-09-07
+```
+
+回填与日更共享 `run_issue_pipeline`，没有另造不经过 Reviewer 的历史数据链。`--skip-llm-check` 只跳过连通性预检，不跳过真正生成时的模型调用。历史回填只是生产并保存内容，不会自动逐期发邮件。
+
+#### 历史机构补全执行规范
+
+`backfill_affiliations.py` 只选择至少关联一条 Focus/Watching 快照的论文，按 paper ID 去重，不对只有 Candidate 快照的论文执行补全。可使用期号闭区间 `--start-date` / `--end-date`、逗号分隔的 `--paper-id` / `--arxiv-id` 进一步限定，并用 `--limit` 控制数量；`--include-existing` 允许重提取已有论文级机构，默认跳过这些记录。
+
+不带 `--apply` 为 dry-run：仍实际下载 PDF、调用模型并输出验证结果，但不更新数据库，因此不是无网络、无模型调用的预览。带 `--apply` 时仅对 `overwrite_applied` 的结果更新 paper.affiliations，循环结束统一提交；整体异常回滚。不会覆盖 authors，也不重新计算历史 score/score_reasons。
+
+执行结果包含 dry_run、scanned、candidates、updated，以及每篇论文的 ID、档位集合、提取状态、尝试次数、机构数、机构列表、更新标志与原因。单篇结构性失败作为结果保留，便于后续有针对性重跑。
+
+cron 写入 `CRON_TZ=Asia/Shanghai`，08:00 更新、08:30 发报，输出追加到 `backend/runtime/logs/daily_update.log` 和 `daily_digest.log`。实际调度依赖 cron 服务安装与时区支持；脚本没有内建跨进程文件锁，也没有晚完成自动追发。
+
+### 5.20 CI/CD 与验证范围
+
+CI 在 main 的 push 和面向 main 的 pull request 上运行三组：后端加 smoke、真实来源 crawler 测试、前端组件测试加生产构建。后端使用 Python 3.10，前端使用 Node.js 20；测试日志上传为 workflow artifact。
+
+Deploy 在 main push 的 CI 成功后或手动触发，使用 production Environment，通过 SSH 登录服务器；渲染环境文件、备份旧 `.env`、更新仓库、安装依赖、检查数据库、重建前端、重启 systemd，再检查本机 API 和 Nginx 代理 API。服务器脚本实际拉取 main 最新内容，不能把控制端检出的 CI SHA 描述成远端已严格锁定的部署版本。
+
+验证命令分别为：后端 `venv/bin/pytest ../tests/backend ../tests/smoke`；外部来源 `venv/bin/pytest ../tests/live`；前端 `npm run test:run` 与 `npm run build`。这些命令的存在和覆盖不表示本次文档改写实际执行了生产抓取或部署。
+
+真实来源测试覆盖 crawler，不是 LLM、MySQL、邮件、API、浏览器全链路上线验收。没有代码证明的响应时间、可用性百分比、模型事实准确率或邮件到达率，不列为已经实现的 SLA。
+
+### 5.21 实现限制与验收约束
+
+| 关注点 | 当前实际边界 | 交接/验收影响 |
+| --- | --- | --- |
+| 历史抓取 | arXiv 各类只取最新 300 条后本地按日期筛选 | 旧日期可能无法完整回填 |
+| 历史热度 | 引用/Trending 是执行当时取得的值 | 历史分数不等于历史时点重建 |
+| 论文去重 | 原样 arxiv_id 字符串 | 版本差异可能成为不同记录 |
+| 详情时间 | 固定取论文最新一期 | 历史卡片和详情期号可能不同 |
+| 元数据历史 | 标题、作者、机构等存在共享 paper | 历史详情可能显示后续更新的机构等元数据 |
+| 机构覆盖 | 默认只补全初选论文，补位论文不再提取；提取在评分后执行 | 当期评分不因补全自动重算，部分补位论文仍可能没有机构 |
+| 候选池分页 | 每期保存全部评分论文；首页仅取前 100，候选池每页 50 | 全量回看需要翻页，首页候选统计使用 total |
+| 发布完整性 | 初选先写档位，无统一最终完整性扫描 | 特殊路径可能有已入档位但空解读行 |
+| 审核依据 | Reviewer 接收 Writer 文本 | 不能声称全文事实核验 |
+| 成功保护 | Pipeline 拒绝成功期重跑，runner 通用清理异常 | 不同入口的防重跑行为不一致 |
+| 并发控制 | 唯一约束和状态，没有真正任务锁 | 不应并发启动同一期并期待自动互斥 |
+| trace 保留 | 与内容事务关联，重试可清理 | 整期失败的阶段历史不保证永久存在 |
+| 邮件去重 | 发送日期 + 类型 + 邮箱 | 同日多期补发会互相影响 |
+| 日报调度 | 08:30 独立检查，不等待日更结束 | 更新晚完成时可能需要维护者补发 |
+| token 时间 | 不同路径使用 UTC/上海时间写无时区字段 | 需专门核验实际失效时刻 |
+| 限流 | 进程内计数和请求 IP | 重启、多进程和代理会影响配额语义 |
+| 页面交互 | 成功验证无专门提示；订阅成功提示未区分管理邮件 | 前后端实际行为与文案有差异 |
+| 页面参数复用 | 方向/候选池未独立监听路径参数变化 | 同组件内切参数可能保留旧内容 |
+
+以上是本次文档核对确认的实现事实或由代码路径直接推得的边界。文档改写没有顺带修改这些业务逻辑；后续修复应作为代码变更单独验证。
+
+## 第六部分：数据库设计
+
+### 6.1 设计目标与持久化边界
+
+数据库要同时保存三类信息：论文来源事实、每期筛选与解读结果、系统运行和订阅分发状态。论文事实不按日期复制整份；日期相关评分和解读独立保存，避免用一行最新结果覆盖所有历史期号。
+
+生产结构使用 MySQL 8.0+、InnoDB、`utf8mb4`、`utf8mb4_unicode_ci`，共 **6 张表**。`database/schema.sql` 定义建表结构，`backend/app/models/domain.py` 定义 ORM。测试可通过 SQLAlchemy 使用 SQLite，但不能据此认为 SQLite 的类型/索引/外键行为与生产 MySQL 完全相同。
+
+下面逐字段列出 SQL 物理类型、是否允许 NULL、默认值和业务用途；所有表的 `id` 都是 INT 自增主键。ORM 的部分索引名称及客户端默认与原始 SQL 表达方式不同，应以实际数据库建表和初始化检查结果为准。
+
+### 6.2 表关系与数据来源
+
+```text
+paper（论文来源事实）
+  1 ── N paper_summary（该论文每一期的结果）
+            1 ── N paper_ai_trace（该快照的 AI 阶段产物）
+
+system_task_log（每一期一个任务状态）
+  通过 issue_date 与 paper_summary 业务关联，没有外键
+
+subscriber（按邮箱唯一的订阅状态）
+notification_delivery_log（按类型、发送日、邮箱唯一的发送记录）
+  两者按邮箱业务关联，没有外键
+```
+
+paper_summary.paper_id 和 paper_ai_trace.paper_summary_id 是真正外键，删除上游记录会级联删除下游。任务期号和邮件中的期号没有强制外键，因此删除某期内容不会自动删除投递记录，删除订阅者也不会自动删除发送日志。
+
+### 6.3 `paper`：论文元数据表
+
+这张表描述“这篇论文是什么”。抓取合并后的事实和中文标题保存在此，同一 ID 重新抓取执行更新而非新增一份。它不保存最终 category、direction 或各期 score。机构存入可空 `affiliations` 字符串数组，作者仍使用原始 authors 结构；不把论文机构列表反向分配给每名作者。机构补全成功时更新列表，未取得新机构时保留已有值。
+
+| 字段 | MySQL 类型 | NULL / 默认 | 约束与业务说明 |
+| --- | --- | --- | --- |
+| `id` | INT | 不允许 / 自增 | 主键，前端详情 URL 和列表 `id` 使用它 |
+| `arxiv_id` | VARCHAR(50) | 不允许 | 唯一外部标识；当前保留来源字符串，可能带版本号 |
+| `title_zh` | VARCHAR(500) | 不允许 | 中文标题；翻译失败可能为待翻译占位 |
+| `title_original` | VARCHAR(500) | 不允许 | 英文原题，评分与分类文本来源之一 |
+| `authors` | JSON | 不允许 | 作者数组；没有来源信息可为空数组 |
+| `affiliations` | JSON | 允许 / NULL | 论文级机构字符串数组；PDF 首页提取通过后写入，不提供逐作者机构映射 |
+| `venue` | VARCHAR(255) | 允许 / NULL | 来源会议、期刊或 journal-ref；只用于元数据和顶会信号 |
+| `abstract` | TEXT | 不允许 | 原始摘要；AI 输入和方向判断依据 |
+| `pdf_url` | VARCHAR(255) | 不允许 | 来源 PDF 地址，不是本站文件存储路径 |
+| `upvotes` | INT | 不允许 / 0 | 当前合并得到的点赞数；不是网站用户点赞 |
+| `arxiv_publish_date` | DATE | 不允许 | 来源发表日期，不等于 issue_date |
+| `created_at` | DATETIME | 不允许 / CURRENT_TIMESTAMP | 首次创建时间，不随元数据更新自动变更 |
+
+作者 JSON 示例：
+
+```json
+[{"name":"Example Author","affiliation":"Example University"},{"name":"Second Author","affiliation":""}]
+```
+
+索引：主键 `id`；唯一 `uk_arxiv_id(arxiv_id)`；普通 `idx_publish_date(arxiv_publish_date)`。不存在引用次数、GitHub 仓库列表、来源 URL 清单、更新时间或 PDF 全文列。数据库 NOT NULL 只禁止 NULL，不验证文本非空或标题包含中文，这些语义由应用处理。
+
+### 6.4 `paper_summary`：期号快照与正式解读表
+
+这张表描述“这篇论文在这期被如何评价、归类和解读”。首页、方向页、候选池与详情的日期相关字段主要来自这里。按当期全部评分论文保存记录，业务层和数据库均没有每日 50 条的截断规则。前端候选池每页 50 条只是查询分页设置。
+
+| 字段 | MySQL 类型 | NULL / 默认 | 约束与业务说明 |
+| --- | --- | --- | --- |
+| `id` | INT | 不允许 / 自增 | 快照主键，AI trace 锚点；不是详情页 URL ID |
+| `paper_id` | INT | 不允许 | 外键到 paper.id，删除论文时级联删除 |
+| `issue_date` | DATE | 不允许 | 简报期号，与 paper_id 组成唯一键 |
+| `score` | INT | 不允许 / 0 | 本期累计评分，不随页面读取重新计算 |
+| `score_reasons` | JSON | 允许 / NULL | 本期已命中信号的分值映射 |
+| `category` | ENUM | 不允许 | `focus`、`watching`、`candidate` |
+| `candidate_reason` | ENUM | 允许 / NULL | `low_score`、`capacity_overflow`、`reviewer_rejected` |
+| `direction` | ENUM | 不允许 | 第五部分所列 15 个固定方向 |
+| `one_line_summary` | TEXT | 允许 / NULL | 中文一句话总结 |
+| `one_line_summary_en` | TEXT | 允许 / NULL | 英文一句话总结 |
+| `core_highlights` | JSON | 允许 / NULL | 中文亮点字符串数组 |
+| `core_highlights_en` | JSON | 允许 / NULL | 英文亮点字符串数组 |
+| `application_scenarios` | TEXT | 允许 / NULL | 中文应用场景 |
+| `application_scenarios_en` | TEXT | 允许 / NULL | 英文应用场景 |
+| `created_at` | DATETIME | 不允许 / CURRENT_TIMESTAMP | 本条快照创建时间 |
+
+索引：主键；唯一 `uk_paper_issue(paper_id,issue_date)`；普通 `idx_issue_date(issue_date)`、`idx_category(category)`、`idx_direction(direction)`；外键 `fk_paper_summary_paper_id` 采用 ON DELETE CASCADE。
+
+JSON 示例：
+
+```json
+{"hf_recommend":30,"community_popularity":10,"has_code":20,"practitioner_relevance":15,"academic_influence":12}
+```
+
+正常情况下对应 score 为 87。亮点 JSON 是 `["亮点文本一", "亮点文本二"]` 这样的字符串数组，不把整段 Markdown 存进该列。
+
+**业务一致性要求：** Candidate 的六个解读字段应全部为 SQL NULL；Focus/Watching 的 candidate_reason 应为 NULL，正式解读应满足字段与条数校验。当前这些跨字段约束通过 Python 晋升/降级函数实现，SQL 没有 CHECK 强制执行；外部手工写库、初选未完成等路径可能破坏它们。
+
+**NULL 语义细节：** TEXT 字段赋 None 对应 SQL NULL；JSON 字段 ORM 使用默认 `JSON` 类型，没有显式 `none_as_null=True`。Python None 在实际方言绑定时可能表现为 JSON `null` 而非 SQL NULL，所以旧文档的“物理 NULL 已严格保证”不能直接沿用。需要区分查询 `IS NULL` 和 JSON 值 null；当前 API 可将读取后的 None 表现为 JSON 响应 null。
+
+### 6.5 `paper_ai_trace`：AI 阶段产物表
+
+记录某个快照经历的 Editor、Writer、Reviewer 输出。它服务于排障与质量回溯，不是读者端正文，也不替代最终六个解读字段。
+
+| 字段 | MySQL 类型 | NULL / 默认 | 约束与业务说明 |
+| --- | --- | --- | --- |
+| `id` | INT | 不允许 / 自增 | 主键 |
+| `paper_summary_id` | INT | 不允许 | 外键到 paper_summary.id，级联删除 |
+| `stage` | ENUM | 不允许 | `editor`、`writer`、`reviewer` |
+| `stage_status` | ENUM | 不允许 | `generated`、`accepted`、`rejected`、`invalid` |
+| `attempt_no` | INT | 不允许 / 1 | 阶段尝试编号，含完整重试偏移和 invalid 编号转换 |
+| `content` | TEXT | 不允许 | 阶段逐篇文本或审核文本/不合法原文 |
+| `created_at` | DATETIME | 不允许 / CURRENT_TIMESTAMP | 记录创建时间 |
+
+索引：唯一 `uk_trace_summary_stage_attempt(paper_summary_id,stage,attempt_no)`；普通 `idx_trace_summary_id(paper_summary_id)`、`idx_trace_stage(stage)`；外键 `fk_paper_ai_trace_summary_id` ON DELETE CASCADE。
+
+同一阶段不同轮次应各自保留，不用最后一次覆盖前一次。正常生成内容与 invalid 原文通过不同编号区分。表中没有 prompt 版本、模型名、token 用量、费用、耗时或结构化拒绝理由列。模型 token 用量通过可选 JSONL 日志另行记录，不存入本表；不能据此声称数据库本身已具备完整成本审计。
+
+trace 与本期内容通常处于同一事务。整体失败回滚或期号恢复清理会使相关记录消失；若需要不可丢失的审计日志，当前结构和事务策略还没有提供这一保证。
+
+### 6.6 `subscriber`：邮箱订阅表
+
+按邮箱保存订阅状态和管理凭证，不承担登录认证。邮箱在当前库排序规则下受唯一索引约束，接口查询后更新已有记录。
+
+| 字段 | MySQL 类型 | NULL / 默认 | 约束与业务说明 |
+| --- | --- | --- | --- |
+| `id` | INT | 不允许 / 自增 | 主键 |
+| `email` | VARCHAR(255) | 不允许 | 唯一邮箱；API 使用 EmailStr 校验 |
+| `status` | INT | 不允许 / 0 | 0 未验证、1 活跃、2 退订 |
+| `verify_token` | VARCHAR(64) | 允许 / NULL | 唯一验证 token，验证成功后清空 |
+| `unsub_token` | VARCHAR(64) | 允许 / NULL | 唯一退订 token，管理邮件/日报前可替换 |
+| `verify_expires_at` | DATETIME | 允许 / NULL | 验证到期时间，名义 24 小时 |
+| `unsub_expires_at` | DATETIME | 允许 / NULL | 退订到期时间，名义 24 小时 |
+| `created_at` | DATETIME | 不允许 / CURRENT_TIMESTAMP | 首次订阅记录创建时间 |
+| `updated_at` | DATETIME | 不允许 / CURRENT_TIMESTAMP，ON UPDATE CURRENT_TIMESTAMP | 订阅记录更新时间 |
+
+索引：唯一 `uk_email(email)`、`uk_verify_token(verify_token)`、`uk_unsub_token(unsub_token)`；普通 `idx_status(status)`。MySQL 唯一索引允许多个 NULL，所以多个已验证用户可以同时将 verify_token 清空。
+
+状态流转：新建→0；有效验证→1；有效退订→2；状态2再次订阅→0→验证后1。状态1重新提交邮箱保持1。数据库 status 为 INT，没有枚举/CHECK 阻止其他数值；合法状态依赖应用写入。
+
+token 当前按明文字符串存储，没有哈希列；链接持有者可以执行对应管理操作。没有用户密码、语言偏好、方向偏好、退订原因、每期发送游标或会员级别字段。时间列无时区，跨路径时区问题见第五部分。
+
+### 6.7 `system_task_log`：期号任务状态表
+
+每个期号最多一条，描述该期最近一次任务状态，不是每次执行新增一条历史事件。重跑会复用或清理再创建该记录。
+
+| 字段 | MySQL 类型 | NULL / 默认 | 约束与业务说明 |
+| --- | --- | --- | --- |
+| `id` | INT | 不允许 / 自增 | 主键 |
+| `issue_date` | DATE | 不允许 | 唯一期号，与快照业务关联 |
+| `status` | VARCHAR(20) | 不允许 | 程序使用 RUNNING、SUCCESS、FAILED |
+| `fetched_count` | INT | 不允许 / 0 | 实际选中抓取日期合并后的全部论文数量 |
+| `processed_count` | INT | 不允许 / 0 | 成功完成 AI 并应用解读的数量 |
+| `error_log` | TEXT | 允许 / NULL | 失败堆栈或错误；成功时清空 |
+| `started_at` | DATETIME | 不允许 / CURRENT_TIMESTAMP | 本次启动时间，重跑刷新 |
+| `finished_at` | DATETIME | 允许 / NULL | 完成或失败时间，运行开始时清空 |
+
+索引：唯一 `uk_issue_date(issue_date)`。status 是 VARCHAR，不由 MySQL ENUM 限制。没有 fetch_date、回退天数、执行主机、锁持有者、尝试次数、模型费用列；实际回退日期主要写进运行文本日志。
+
+fetched_count 不受候选池分页大小限制，processed_count 一般不超过 17，但数据库本身不限制这些数值。运行时间由代码的 datetime 写入，与其他表时间约定不完全统一，不应默认所有 DATETIME 都是同一时区的审计时间。
+
+### 6.8 `notification_delivery_log`：邮件投递记录表
+
+记录日报与常规维护者告警的发送结果，并承载同日防重复判断。不是所有邮件都会写此表：订阅验证邮件、管理邮件和部分直接告警不走带日志投递路径。
+
+| 字段 | MySQL 类型 | NULL / 默认 | 约束与业务说明 |
+| --- | --- | --- | --- |
+| `id` | INT | 不允许 / 自增 | 主键 |
+| `notification_type` | ENUM | 不允许 | `daily_digest` 或 `job_alert` |
+| `run_date` | DATE | 不允许 | 实际发送的上海日期，参与去重 |
+| `issue_date` | DATE | 允许 / NULL | 邮件关联期号，可能与 run_date 不同 |
+| `recipient_email` | VARCHAR(255) | 不允许 | 收件邮箱，无 subscriber 外键 |
+| `status` | ENUM | 不允许 | `sent`、`failed`、`skipped` |
+| `subject` | VARCHAR(255) | 不允许 | 邮件主题 |
+| `error_log` | TEXT | 允许 / NULL | 发送失败原因，成功后清空 |
+| `sent_at` | DATETIME | 不允许 / CURRENT_TIMESTAMP | 记录写入或更新时刻；失败记录也有值，不代表确已到达邮箱 |
+
+索引：唯一 `uk_notification_type_run_recipient(notification_type,run_date,recipient_email)`；普通 `idx_notification_type(notification_type)`、`idx_notification_run_date(run_date)`、`idx_notification_issue_date(issue_date)`、`idx_notification_status(status)`。
+
+失败后重试更新同一行，不保存每次发送尝试的独立历史。枚举虽然允许 skipped，已有 sent 的跳过和 dry_run 当前直接返回结果，通常不会新增 skipped 日志行。表中没有邮件正文、SMTP 消息 ID、打开状态、回执或退信事件。
+
+### 6.9 数据写入流程与级联删除规则
+
+正常生产先提交 RUNNING 任务，再按 arxiv_id upsert paper，重建本期 paper_summary，为每篇写入评分和初选状态，随后写 trace 与最终解读，最后提交成功状态。单篇降级清空解读而保留快照及已生成 trace。
+
+删除 paper 会通过外键级联删除所有期号下的该论文快照及 trace，影响不止一天。删除某期 paper_summary 会删除相应 trace，但保留共享论文事实。恢复函数显式删除本期 trace、summary、task，不删除 paper、subscriber 或 notification_delivery_log。
+
+subscriber 状态变化不改动历史投递记录。邮件日志没有外键，历史邮箱或期号记录可能在对应业务对象被删除后继续存在，这是当前审计保存方式的一部分。
+
+### 6.10 业务查询与索引设计
+
+| 查询场景 | 主要表和条件 | 当前支撑 |
+| --- | --- | --- |
+| 一期首页 / 候选池 | summary.issue_date + category + paper 连接 | issue_date、category 普通索引与主键连接 |
+| 方向历史列表 | summary.direction + category，按日期排序 | direction、category、issue_date 独立索引 |
+| 论文最新详情 | summary.paper_id，按 issue_date 倒序 | `(paper_id,issue_date)` 唯一键 |
+| 日历 | summary 按 issue_date 分组，task 日期边界 | issue_date 索引与任务唯一期号 |
+| AI 排障 | trace.paper_summary_id / stage | trace 外键索引、阶段索引与联合唯一键 |
+| 发报用户 | subscriber.status=1 | status 索引 |
+| 发信去重 | 类型 + run_date + recipient_email | 投递联合唯一键 |
+
+当前没有针对所有过滤和排序组合建立覆盖索引，也没有读缓存、分页游标或分区表。列表分页使用 offset/limit；历史规模增大后的查询性能需要实测，不能仅凭现有索引声明任意数据量下都保持固定响应时间。
+
+### 6.11 初始化、迁移与一致性检查
+
+`database/schema.sql` 使用 `CREATE TABLE IF NOT EXISTS`，主要用于不存在的表；它不会自动把旧表结构变成新结构。`setup_local_db.py` 创建/检查数据库；对于已有 paper 表，先检测并自动补充缺失的 `affiliations JSON NULL` 列，再对字段类型、可空性、默认值、索引和枚举等执行校验。因此默认初始化并非完全只读检查；其他差异不能仅重复建表脚本就视为已修复。
+
+显式迁移使用 `--migrate-existing` 并关联 `database/migrate_v225.sql`，迁移后再次确保机构列存在。仓库另有 `database/migrate_v226_affiliations.sql`，通过 ALTER TABLE 在 authors 后新增可空 affiliations JSON 列；手工重复执行前需检查列是否存在。中文标题修复是独立的 `--backfill-title-zh` 或标题脚本，机构数据补全通过 `backfill_affiliations.py` 单独执行；新增机构列本身不会自动提取历史论文。迁移、数据修复和日常抓取是不同操作，不在用户浏览页面时自动执行。
+
+数据库验收应分别检查结构和数据：6 张表与各唯一键/外键是否存在；同一论文同一期是否唯一；Candidate 解读是否正确为空；非 Candidate 是否有完整双语内容；score 是否等于信号之和；方向枚举是否合法；任务计数与实际处理结果是否合理；邮件去重键是否符合补发场景；token 时间是否一致解释。当前建表和 ORM 并未把所有这些业务条件编码为数据库约束，因此必须以实际写入结果验证，而不能只看表定义推断其一定成立。
