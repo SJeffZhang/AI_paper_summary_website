@@ -1,17 +1,29 @@
 :root {
   --page-bg: #f4eee3;
   --page-bg-soft: #efe7d9;
+  --page-bg-radial: rgba(196, 111, 60, 0.12);
+  --page-bg-start: #f7f1e7;
+  --page-bg-end: #efe6d7;
   --panel-bg: rgba(255, 251, 244, 0.68);
   --panel-strong: rgba(255, 251, 244, 0.82);
   --panel-contrast: rgba(240, 228, 210, 0.74);
+  --panel-soft: rgba(255, 250, 242, 0.72);
+  --panel-solid: rgba(255, 250, 242, 0.84);
+  --panel-hover: rgba(255, 250, 242, 0.56);
+  --panel-faint: rgba(255, 250, 242, 0.48);
+  --panel-input: rgba(247, 240, 228, 0.92);
   --ink-strong: #221d17;
   --ink-body: #433a31;
   --ink-muted: #77695c;
+  --ink-inverse: #fffaf2;
   --line-soft: rgba(83, 69, 54, 0.14);
   --line-strong: rgba(83, 69, 54, 0.24);
   --accent: #c46f3c;
   --accent-deep: #9b5429;
   --accent-soft: rgba(196, 111, 60, 0.12);
+  --accent-soft-strong: rgba(196, 111, 60, 0.18);
+  --accent-line: rgba(196, 111, 60, 0.28);
+  --accent-line-strong: rgba(196, 111, 60, 0.34);
   --focus-tone: #a94e27;
   --watch-tone: #6d6658;
   --candidate-tone: #8c7662;
@@ -23,6 +35,26 @@
   --glass-blur: 22px;
   --glass-blur-strong: 30px;
   --glass-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.06));
+  --overlay-bg: rgba(34, 29, 23, 0.22);
+  --selection-bg: rgba(196, 111, 60, 0.18);
+  --chip-bg: rgba(255, 250, 242, 0.74);
+  --chip-focus-bg: rgba(169, 78, 39, 0.08);
+  --chip-watch-bg: rgba(109, 102, 88, 0.08);
+  --chip-candidate-bg: rgba(140, 118, 98, 0.1);
+  --button-primary-bg: #221d17;
+  --button-primary-border: rgba(34, 29, 23, 0.92);
+  --button-primary-text: #fffaf2;
+  --button-secondary-bg: rgba(255, 250, 242, 0.82);
+  --button-secondary-border: rgba(83, 69, 54, 0.14);
+  --button-secondary-text: #221d17;
+  --button-tertiary-bg: rgba(255, 250, 242, 0.45);
+  --button-tertiary-border: rgba(83, 69, 54, 0.1);
+  --button-tertiary-text: #433a31;
+  --dialog-bg: rgba(255, 250, 242, 0.9);
+  --calendar-muted-bg: rgba(103, 92, 79, 0.08);
+  --calendar-muted-text: rgba(67, 58, 49, 0.44);
+  --poster-gradient: linear-gradient(180deg, rgba(255, 251, 244, 0.8), rgba(240, 228, 210, 0.9));
+  --poster-glow: radial-gradient(circle at top right, rgba(196, 111, 60, 0.18), transparent 42%);
   --radius-xl: 32px;
   --radius-lg: 24px;
   --radius-md: 18px;
@@ -38,6 +70,63 @@
   --tap-scale: 0.992;
 }
 
+:root[data-theme='dark'] {
+  --page-bg: #111417;
+  --page-bg-soft: #171c20;
+  --page-bg-radial: rgba(196, 111, 60, 0.08);
+  --page-bg-start: #1a1e23;
+  --page-bg-end: #12161a;
+  --panel-bg: rgba(24, 29, 34, 0.7);
+  --panel-strong: rgba(28, 34, 39, 0.82);
+  --panel-contrast: rgba(34, 40, 46, 0.8);
+  --panel-soft: rgba(31, 37, 43, 0.76);
+  --panel-solid: rgba(30, 36, 41, 0.88);
+  --panel-hover: rgba(38, 44, 50, 0.84);
+  --panel-faint: rgba(27, 33, 39, 0.72);
+  --panel-input: rgba(24, 29, 34, 0.96);
+  --ink-strong: #f5efe6;
+  --ink-body: #ddd2c5;
+  --ink-muted: #a99b8d;
+  --ink-inverse: #16120d;
+  --line-soft: rgba(235, 223, 209, 0.12);
+  --line-strong: rgba(235, 223, 209, 0.2);
+  --accent: #d88a58;
+  --accent-deep: #ebb084;
+  --accent-soft: rgba(216, 138, 88, 0.16);
+  --accent-soft-strong: rgba(216, 138, 88, 0.24);
+  --accent-line: rgba(216, 138, 88, 0.34);
+  --accent-line-strong: rgba(216, 138, 88, 0.44);
+  --focus-tone: #f0a47a;
+  --watch-tone: #c4b6a5;
+  --candidate-tone: #bba893;
+  --success-tone: #83a391;
+  --danger-tone: #d29185;
+  --shadow-soft: 0 24px 80px rgba(0, 0, 0, 0.28);
+  --shadow-card: 0 16px 40px rgba(0, 0, 0, 0.24);
+  --shadow-hover: 0 22px 48px rgba(0, 0, 0, 0.34);
+  --glass-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.01));
+  --overlay-bg: rgba(5, 7, 9, 0.52);
+  --selection-bg: rgba(216, 138, 88, 0.28);
+  --chip-bg: rgba(28, 34, 39, 0.9);
+  --chip-focus-bg: rgba(240, 164, 122, 0.12);
+  --chip-watch-bg: rgba(196, 182, 165, 0.12);
+  --chip-candidate-bg: rgba(187, 168, 147, 0.12);
+  --button-primary-bg: #f1e6d9;
+  --button-primary-border: rgba(241, 230, 217, 0.9);
+  --button-primary-text: #1a1611;
+  --button-secondary-bg: rgba(30, 36, 41, 0.9);
+  --button-secondary-border: rgba(235, 223, 209, 0.12);
+  --button-secondary-text: #f5efe6;
+  --button-tertiary-bg: rgba(30, 36, 41, 0.72);
+  --button-tertiary-border: rgba(235, 223, 209, 0.1);
+  --button-tertiary-text: #ddd2c5;
+  --dialog-bg: rgba(22, 27, 31, 0.96);
+  --calendar-muted-bg: rgba(235, 223, 209, 0.06);
+  --calendar-muted-text: rgba(221, 210, 197, 0.46);
+  --poster-gradient: linear-gradient(180deg, rgba(31, 37, 43, 0.95), rgba(24, 29, 34, 0.96));
+  --poster-glow: radial-gradient(circle at top right, rgba(216, 138, 88, 0.16), transparent 42%);
+}
+
 *,
 *::before,
 *::after {
@@ -46,8 +135,8 @@
 
 html {
   background:
-    radial-gradient(circle at top left, rgba(196, 111, 60, 0.12), transparent 30%),
-    linear-gradient(180deg, #f7f1e7 0%, #efe6d7 100%);
+    radial-gradient(circle at top left, var(--page-bg-radial), transparent 30%),
+    linear-gradient(180deg, var(--page-bg-start) 0%, var(--page-bg-end) 100%);
 }
 
 body {
@@ -61,7 +150,7 @@ body {
 }
 
 body::selection {
-  background: rgba(196, 111, 60, 0.18);
+  background: var(--selection-bg);
 }
 
 button,
@@ -144,7 +233,7 @@ a {
   gap: 8px;
   padding: 8px 12px;
   border-radius: 999px;
-  background: rgba(255, 250, 242, 0.74);
+  background: var(--chip-bg);
   border: 1px solid var(--line-soft);
   color: var(--ink-body);
   font-size: 12px;
@@ -158,19 +247,19 @@ a {
 .focus-chip {
   color: var(--focus-tone);
   border-color: rgba(169, 78, 39, 0.2);
-  background: rgba(169, 78, 39, 0.08);
+  background: var(--chip-focus-bg);
 }
 
 .watching-chip {
   color: var(--watch-tone);
   border-color: rgba(109, 102, 88, 0.22);
-  background: rgba(109, 102, 88, 0.08);
+  background: var(--chip-watch-bg);
 }
 
 .candidate-chip {
   color: var(--candidate-tone);
   border-color: rgba(140, 118, 98, 0.24);
-  background: rgba(140, 118, 98, 0.1);
+  background: var(--chip-candidate-bg);
 }
 
 .app-link {
@@ -225,9 +314,9 @@ a {
 }
 
 .primary-button {
-  border: 1px solid rgba(34, 29, 23, 0.92);
-  background: #221d17;
-  color: #fffaf2;
+  border: 1px solid var(--button-primary-border);
+  background: var(--button-primary-bg);
+  color: var(--button-primary-text);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.08),
     inset 0 -1px 0 rgba(0, 0, 0, 0.18),
@@ -235,15 +324,15 @@ a {
 }
 
 .secondary-button {
-  background: rgba(255, 250, 242, 0.82);
-  color: var(--ink-strong);
-  border: 1px solid var(--line-soft);
+  background: var(--button-secondary-bg);
+  color: var(--button-secondary-text);
+  border: 1px solid var(--button-secondary-border);
 }
 
 .tertiary-button {
-  background: rgba(255, 250, 242, 0.45);
-  color: var(--ink-body);
-  border: 1px solid rgba(83, 69, 54, 0.1);
+  background: var(--button-tertiary-bg);
+  color: var(--button-tertiary-text);
+  border: 1px solid var(--button-tertiary-border);
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -265,7 +354,7 @@ a {
   overflow: hidden;
   background:
     var(--glass-sheen),
-    rgba(255, 250, 242, 0.9);
+    var(--dialog-bg);
   box-shadow: 0 28px 80px rgba(34, 29, 23, 0.18);
   backdrop-filter: blur(var(--glass-blur-strong));
   -webkit-backdrop-filter: blur(var(--glass-blur-strong));
@@ -292,7 +381,7 @@ a {
 .el-input__wrapper {
   border-radius: 14px;
   box-shadow: none !important;
-  background: rgba(247, 240, 228, 0.92);
+  background: var(--panel-input);
 }
 
 .el-empty {
